@@ -1,0 +1,222 @@
+{
+  "schema_version": 2,
+  "source_document": "正文/第01章_输掉Major后，我从民间赛重新开始.md",
+  "locked_lines": [
+    {
+      "shot_id": "S01_SH01",
+      "speaker_id": "CHEN_MO",
+      "delivery": "off_screen_radio",
+      "text": "A1 两个。一个贴三箱，后面还有。",
+      "source_line": 21,
+      "start_hint_s": 0.0,
+      "end_hint_s": 3.8
+    },
+    {
+      "shot_id": "S01_SH03",
+      "speaker_id": "ZHAO_YU",
+      "delivery": "off_screen_radio",
+      "text": "烟里这个我来。周野，你跟着补。",
+      "source_line": 25,
+      "start_hint_s": 0.0,
+      "end_hint_s": 3.8
+    },
+    {
+      "shot_id": "S01_SH04",
+      "speaker_id": "CHEN_MO",
+      "delivery": "off_screen_radio",
+      "text": "我从跳台下来！",
+      "source_line": 61,
+      "start_hint_s": 0.0,
+      "end_hint_s": 1.4
+    },
+    {
+      "shot_id": "S02_SH01",
+      "speaker_id": "CHEN_MO",
+      "delivery": "on_screen",
+      "text": "先看一遍。",
+      "source_line": 109,
+      "start_hint_s": 0.0,
+      "end_hint_s": 1.0
+    },
+    {
+      "shot_id": "S02_SH01",
+      "speaker_id": "CHEN_MO",
+      "delivery": "on_screen",
+      "text": "不找替罪羊，只把当时听见的、看见的说清楚。",
+      "source_line": 109,
+      "start_hint_s": 1.2,
+      "end_hint_s": 5.8
+    },
+    {
+      "shot_id": "S02_SH02",
+      "speaker_id": "ZHOU_YE",
+      "delivery": "on_screen",
+      "text": "我听见后面还有脚步，但没报出来。",
+      "source_line": 129,
+      "start_hint_s": 0.0,
+      "end_hint_s": 2.2
+    },
+    {
+      "shot_id": "S02_SH02",
+      "speaker_id": "ZHOU_YE",
+      "delivery": "on_screen",
+      "text": "我怕他突然冲，就把准星挪开了。赵雨开枪时，我没能马上补上。",
+      "source_line": 129,
+      "start_hint_s": 2.5,
+      "end_hint_s": 7.2
+    },
+    {
+      "shot_id": "S03_SH01",
+      "speaker_id": "ZHAO_YU",
+      "delivery": "recorded_replay",
+      "text": "包边先别动，第二个脚步还没到。",
+      "source_line": 161,
+      "start_hint_s": 0.0,
+      "end_hint_s": 3.4
+    },
+    {
+      "shot_id": "S04_SH01",
+      "speaker_id": "SU_HE",
+      "delivery": "on_screen",
+      "text": "别碰他。",
+      "source_line": 217,
+      "start_hint_s": 0.0,
+      "end_hint_s": 0.8
+    },
+    {
+      "shot_id": "S04_SH01",
+      "speaker_id": "ZHOU_YE",
+      "delivery": "on_screen",
+      "text": "这是哪儿？",
+      "source_line": 235,
+      "start_hint_s": 1.8,
+      "end_hint_s": 2.7
+    },
+    {
+      "shot_id": "S04_SH02",
+      "speaker_id": "SU_HE",
+      "delivery": "on_screen",
+      "text": "曜京南城，白桥枪馆。",
+      "source_line": 245,
+      "start_hint_s": 0.0,
+      "end_hint_s": 1.8
+    },
+    {
+      "shot_id": "S04_SH02",
+      "speaker_id": "SU_HE",
+      "delivery": "on_screen",
+      "text": "你先别站。",
+      "source_line": 245,
+      "start_hint_s": 2.0,
+      "end_hint_s": 3.0
+    },
+    {
+      "shot_id": "S04_SH03",
+      "speaker_id": "XU_AN",
+      "delivery": "on_screen",
+      "text": "断帧前训练服是六比五。声音先走了半秒，比分跳成七比五，设备间镜头黑了一格。",
+      "source_line": 333,
+      "start_hint_s": 0.0,
+      "end_hint_s": 5.8
+    },
+    {
+      "shot_id": "S04_SH04",
+      "speaker_id": "ZHOU_YE",
+      "delivery": "on_screen",
+      "text": "给我一台机器。",
+      "source_line": 417,
+      "start_hint_s": 0.0,
+      "end_hint_s": 1.5
+    },
+    {
+      "shot_id": "S05_SH01",
+      "speaker_id": "TANG_XIA",
+      "delivery": "on_screen",
+      "text": "给不给闪？",
+      "source_line": 567,
+      "start_hint_s": 0.0,
+      "end_hint_s": 1.2
+    },
+    {
+      "shot_id": "S05_SH01",
+      "speaker_id": "ZHOU_YE",
+      "delivery": "on_screen",
+      "text": "给。",
+      "source_line": 571,
+      "start_hint_s": 1.5,
+      "end_hint_s": 1.8
+    },
+    {
+      "shot_id": "S05_SH02",
+      "speaker_id": "TANG_XIA",
+      "delivery": "on_screen",
+      "text": "你又想看两条线。",
+      "source_line": 589,
+      "start_hint_s": 0.0,
+      "end_hint_s": 1.6
+    },
+    {
+      "shot_id": "S05_SH02",
+      "speaker_id": "ZHOU_YE",
+      "delivery": "on_screen",
+      "text": "对。",
+      "source_line": 593,
+      "start_hint_s": 1.8,
+      "end_hint_s": 2.1
+    },
+    {
+      "shot_id": "S06_SH01",
+      "speaker_id": "ZHOU_YE",
+      "delivery": "on_screen",
+      "text": "右廊可能一个，距离不确定。近点先打，我补近点。右边出声再转。",
+      "source_line": 605,
+      "start_hint_s": 0.0,
+      "end_hint_s": 4.2
+    },
+    {
+      "shot_id": "S06_SH01",
+      "speaker_id": "TANG_XIA",
+      "delivery": "on_screen",
+      "text": "收到。",
+      "source_line": 607,
+      "start_hint_s": 4.4,
+      "end_hint_s": 4.8
+    },
+    {
+      "shot_id": "S06_SH01",
+      "speaker_id": "ZHOU_YE",
+      "delivery": "on_screen",
+      "text": "右廊到门，半秒！",
+      "source_line": 617,
+      "start_hint_s": 6.2,
+      "end_hint_s": 7.0
+    },
+    {
+      "shot_id": "S07_SH01",
+      "speaker_id": "HAN_PING",
+      "delivery": "on_screen",
+      "text": "第五个人填谁？",
+      "source_line": 705,
+      "start_hint_s": 0.0,
+      "end_hint_s": 1.2
+    },
+    {
+      "shot_id": "S07_SH01",
+      "speaker_id": "ZHOU_YE_INNER",
+      "delivery": "off_screen_inner_voice",
+      "text": "也好。",
+      "source_line": 717,
+      "start_hint_s": 4.0,
+      "end_hint_s": 4.6
+    },
+    {
+      "shot_id": "S07_SH01",
+      "speaker_id": "ZHOU_YE_INNER",
+      "delivery": "off_screen_inner_voice",
+      "text": "第一枪，从白桥开始。",
+      "source_line": 719,
+      "start_hint_s": 4.7,
+      "end_hint_s": 6.2
+    }
+  ]
+}
