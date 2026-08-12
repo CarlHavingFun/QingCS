@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-"""Validate a chapter-1 dialogue lock against the novel source text.
+"""Validate the chapter-1 source lock and the complete storyboard gate.
 
-The validator intentionally checks only source-locked dialogue and its timing
-hints.  Advisory shot durations are not summed or treated as a hard runtime
-contract.
+Dialogue is a closed structured multiset, while shot durations remain advisory
+values that are summed for reporting and checked only for local performance
+capacity and continuous timecodes.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -54,7 +56,7 @@ STORYBOARD_REQUIRED_FIELDS = (
     "NEGATIVE",
 )
 
-_SHOT_ID_RE = re.compile(r"^(S\d+_SH\d+)([A-Z])?$")
+_SHOT_ID_RE = re.compile(r"^(S\d+_SH\d+)([ABC])?$")
 _DURATION_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(?:s|秒)?\s*$")
 _TIME_CODE_RE = re.compile(
     r"^\s*(\d+(?:\.\d+)?)\s*s?\s*[-–—]\s*"
@@ -65,7 +67,56 @@ _TIMING_INTERVAL_RE = re.compile(
     r"(\d+(?:\.\d+)?)\s*s?"
 )
 _ANCHOR_RE = re.compile(r"\b[ABC]\d+\b")
-_QUOTED_TEXT_RE = re.compile(r"“([^”]+)”|\"([^\"]+)\"")
+_DIALOGUE_ENTRY_RE = re.compile(
+    r"(?P<speaker>[A-Z][A-Z0-9_]*)（(?P<delivery>[a-z][a-z0-9_]*)）："
+    r"“(?P<text>[^“”]+)”"
+)
+_TIMING_ENTRY_RE = re.compile(
+    r"(?P<speaker>[A-Z][A-Z0-9_]*)\|(?P<delivery>[a-z][a-z0-9_]*)\|"
+    r"(?P<start>\d+(?:\.\d+)?)s?-(?P<end>\d+(?:\.\d+)?)s?\|"
+    r"before=(?P<before>\d+(?:\.\d+)?)\|after=(?P<after>\d+(?:\.\d+)?)"
+)
+_EVENT_ENTRY_RE = re.compile(
+    r"(?P<event>[a-z][a-z0-9_]*)=(?P<time>\d+(?:\.\d+)?)s?"
+)
+
+NO_DIALOGUE_PREFIX = "无台词／刻意沉默："
+PROVENANCE_FIELDS = (
+    "PROVENANCE_SOURCE_PATH",
+    "PROVENANCE_SOURCE_SHA256",
+    "PROVENANCE_DIALOGUE_PATH",
+    "PROVENANCE_DIALOGUE_SHA256",
+    "PROVENANCE_ANCHOR_PATH",
+    "PROVENANCE_ANCHOR_SHA256",
+)
+EXPECTED_PROVENANCE_PATHS = {
+    "PROVENANCE_SOURCE_PATH": "正文/第01章_输掉Major后，我从民间赛重新开始.md",
+    "PROVENANCE_DIALOGUE_PATH": "AI生产/样片01/声音/dialogue-lock-v2.json",
+    "PROVENANCE_ANCHOR_PATH": "分镜/第01章_样片锚点清单_重制版.md",
+}
+SPEECH_RATE_BY_DELIVERY = {
+    "off_screen_radio": 5.0,
+    "recorded_replay": 5.0,
+    "off_screen_inner_voice": 4.0,
+    "on_screen": 4.0,
+}
+TACTICAL_TERMS = (
+    "A1",
+    "烟里",
+    "给不给闪",
+    "右廊",
+    "近点",
+    "半秒",
+    "收到",
+)
+UI_TEXT_PATTERNS = (
+    re.compile(r"(?<!\d)16:19(?!\d)"),
+    re.compile(r"(?<!\d)7:5(?!\d)"),
+    re.compile(r"十六比十九"),
+    re.compile(r"七比五"),
+    re.compile(r"(?:报名表|第五格|空格).{0,20}[“\"]周野[”\"]"),
+    re.compile(r"[“\"]周野[”\"].{0,20}(?:报名表|第五格|空格)"),
+)
 
 
 def _is_finite_number(value: Any) -> bool:
@@ -149,6 +200,105 @@ def _parse_storyboard(text: str) -> tuple[list[dict[str, Any]], list[str]]:
     return records, errors
 
 
+def _parse_storyboard_header(text: str) -> tuple[dict[str, str], list[str]]:
+    header: dict[str, str] = {}
+    errors: list[str] = []
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if re.match(r"^###\s+分镜\b", line):
+            break
+        match = re.match(r"^(PROVENANCE_[A-Z0-9_]+):\s*(.*?)\s*$", line)
+        if match is None:
+            continue
+        field, value = match.groups()
+        if field in header:
+            errors.append(f"storyboard header line {line_number} repeats {field}")
+        header[field] = value
+    return header, errors
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _safe_project_path(storyboard_path: Path, relative_path: str) -> tuple[Path | None, str | None]:
+    if not relative_path or Path(relative_path).is_absolute():
+        return None, "provenance path must be relative to the project root"
+    project_root = storyboard_path.resolve().parent.parent
+    candidate = (project_root / relative_path).resolve()
+    try:
+        candidate.relative_to(project_root)
+    except ValueError:
+        return None, "provenance path escapes the project root"
+    return candidate, None
+
+
+def _validate_provenance(
+    storyboard_text: str,
+    storyboard_path: Path,
+) -> tuple[list[str], set[str] | None]:
+    header, errors = _parse_storyboard_header(storyboard_text)
+    for field in PROVENANCE_FIELDS:
+        value = header.get(field, "")
+        if not value:
+            errors.append(f"storyboard header missing {field}")
+
+    resolved: dict[str, Path] = {}
+    for path_field, expected_path in EXPECTED_PROVENANCE_PATHS.items():
+        actual_path = header.get(path_field, "")
+        if actual_path and actual_path != expected_path:
+            errors.append(
+                f"{path_field} must be the project-relative path {expected_path!r}, "
+                f"got {actual_path!r}"
+            )
+        if not actual_path:
+            continue
+        path, path_error = _safe_project_path(storyboard_path, actual_path)
+        if path_error is not None or path is None:
+            errors.append(f"{path_field}: {path_error}")
+            continue
+        resolved[path_field] = path
+        if not path.is_file():
+            errors.append(f"{path_field} does not exist: {actual_path}")
+
+    for path_field, hash_field in (
+        ("PROVENANCE_SOURCE_PATH", "PROVENANCE_SOURCE_SHA256"),
+        ("PROVENANCE_DIALOGUE_PATH", "PROVENANCE_DIALOGUE_SHA256"),
+        ("PROVENANCE_ANCHOR_PATH", "PROVENANCE_ANCHOR_SHA256"),
+    ):
+        path = resolved.get(path_field)
+        expected_hash = header.get(hash_field, "")
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_hash):
+            errors.append(f"{hash_field} must be a 64-character SHA-256 hex digest")
+        if path is not None and path.is_file():
+            actual_hash = _sha256(path)
+            if expected_hash.lower() != actual_hash:
+                errors.append(
+                    f"{hash_field} does not match {header.get(path_field, '')}: "
+                    f"expected {actual_hash}, got {expected_hash}"
+                )
+
+    anchor_ids: set[str] | None = None
+    anchor_path = resolved.get("PROVENANCE_ANCHOR_PATH")
+    if anchor_path is not None and anchor_path.is_file():
+        try:
+            anchor_text = anchor_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            errors.append(f"cannot read anchor catalog {anchor_path}: {exc}")
+        else:
+            anchor_ids = set(
+                re.findall(r"^###\s+([ABC]\d+)\s+", anchor_text, flags=re.MULTILINE)
+            )
+            if not anchor_ids:
+                errors.append("anchor catalog parsed successfully but contains no anchor IDs")
+    else:
+        errors.append("anchor catalog is unavailable; cannot validate ANCHOR_REFS")
+    return errors, anchor_ids
+
+
 def _anchor_ids_near_storyboard(path: Path) -> set[str] | None:
     """Read the sibling anchor list when the normal project layout is present."""
 
@@ -192,13 +342,119 @@ def _parse_time_code(value: Any) -> tuple[float, float] | None:
     return start, end
 
 
-def _parse_dialogue_intervals(value: Any) -> list[tuple[float, float]]:
-    if not isinstance(value, str):
-        return []
-    return [
-        (float(start), float(end))
-        for start, end in _TIMING_INTERVAL_RE.findall(value)
-    ]
+def _consume_structured_entries(
+    value: str,
+    pattern: re.Pattern[str],
+    label: str,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    entries: list[dict[str, Any]] = []
+    errors: list[str] = []
+    position = 0
+    while position < len(value):
+        while position < len(value) and value[position] in " \t；;":
+            position += 1
+        if position >= len(value):
+            break
+        match = pattern.match(value, position)
+        if match is None:
+            errors.append(
+                f"{label} has malformed structured entry near {value[position:position + 40]!r}"
+            )
+            break
+        entries.append(match.groupdict())
+        position = match.end()
+        if position < len(value) and value[position] not in " \t；;":
+            errors.append(
+                f"{label} has unexpected separator near {value[position:position + 40]!r}"
+            )
+            break
+    return entries, errors
+
+
+def _parse_dialogue_field(value: Any) -> tuple[list[dict[str, str]], list[str]]:
+    if not isinstance(value, str) or not value.strip():
+        return [], ["DIALOGUE must be a non-empty string"]
+    value = value.strip()
+    if value.startswith(NO_DIALOGUE_PREFIX):
+        remainder = value[len(NO_DIALOGUE_PREFIX):]
+        if (
+            _DIALOGUE_ENTRY_RE.search(remainder)
+            or "“" in remainder
+            or "”" in remainder
+            or '"' in remainder
+            or "：" in remainder
+            or ":" in remainder
+            or "；" in remainder
+            or ";" in remainder
+        ):
+            return [], [
+                "no-dialogue DIALOGUE may contain only the canonical prefix and a "
+                "silence description; it must not contain a speaking entry"
+            ]
+        return [], []
+    if "无台词" in value:
+        return [], [f"no-dialogue DIALOGUE must start with {NO_DIALOGUE_PREFIX!r}"]
+    entries, errors = _consume_structured_entries(
+        value, _DIALOGUE_ENTRY_RE, "DIALOGUE"
+    )
+    return entries, errors
+
+
+def _parse_timing_field(value: Any) -> tuple[list[dict[str, str]], list[str]]:
+    if not isinstance(value, str) or not value.strip():
+        return [], ["DIALOGUE_TIMING must be a non-empty string"]
+    value = value.strip()
+    if value.startswith(NO_DIALOGUE_PREFIX):
+        remainder = value[len(NO_DIALOGUE_PREFIX):]
+        if _TIMING_ENTRY_RE.search(remainder):
+            return [], ["no-dialogue DIALOGUE_TIMING must not contain a speaking interval"]
+        return [], []
+    entries, errors = _consume_structured_entries(
+        value, _TIMING_ENTRY_RE, "DIALOGUE_TIMING"
+    )
+    return entries, errors
+
+
+def _parse_event_timing(value: Any) -> tuple[dict[str, float], list[str]]:
+    if not isinstance(value, str) or not value.strip():
+        return {}, ["EVENT_TIMING must be a non-empty string"]
+    events: dict[str, float] = {}
+    errors: list[str] = []
+    position = 0
+    while position < len(value):
+        while position < len(value) and value[position] in " \t；;":
+            position += 1
+        if position >= len(value):
+            break
+        match = _EVENT_ENTRY_RE.match(value, position)
+        if match is None:
+            errors.append(
+                f"EVENT_TIMING has malformed event near {value[position:position + 40]!r}"
+            )
+            break
+        event_name = match.group("event")
+        if event_name in events:
+            errors.append(f"EVENT_TIMING repeats event {event_name}")
+        events[event_name] = float(match.group("time"))
+        position = match.end()
+        if position < len(value) and value[position] not in " \t；;":
+            errors.append(
+                f"EVENT_TIMING has unexpected separator near {value[position:position + 40]!r}"
+            )
+            break
+    return events, errors
+
+
+def _speech_rate(text: str, delivery: str) -> float:
+    if delivery in {"off_screen_radio", "recorded_replay"}:
+        return 5.0
+    if delivery == "on_screen" and any(term in text for term in TACTICAL_TERMS):
+        return 5.0
+    return SPEECH_RATE_BY_DELIVERY.get(delivery, 4.0)
+
+
+def _minimum_speech_duration(text: str, delivery: str) -> float:
+    return len(text) / _speech_rate(text, delivery)
 
 
 def _locked_lines(payload: Any) -> tuple[list[Any] | None, list[str]]:
@@ -300,7 +556,7 @@ def validate_storyboard(
     *,
     anchor_ids: set[str] | None = None,
 ) -> tuple[list[str], dict[str, Any]]:
-    """Validate shot cards, continuity, and source-locked dialogue mapping."""
+    """Validate shot cards, continuity, and a closed dialogue lock."""
 
     records, errors = _parse_storyboard(storyboard_text)
     if errors:
@@ -310,11 +566,17 @@ def validate_storyboard(
     if locked_records is None:
         return lock_errors, {"records": records, "locked_count": 0}
     errors.extend(lock_errors)
+    if anchor_ids is None:
+        errors.append("anchor catalog is unavailable; cannot validate ANCHOR_REFS")
 
     seen_ids: dict[str, int] = {}
     previous_end: float | None = None
     durations: list[float] = []
     dialogue_by_base: dict[str, list[dict[str, Any]]] = {}
+    actual_dialogue: list[tuple[str, str, str, str]] = []
+    timing_by_shot: dict[str, list[dict[str, Any]]] = {}
+    event_by_shot: dict[str, dict[str, float]] = {}
+    timecode_by_shot: dict[str, tuple[float, float]] = {}
 
     for index, record in enumerate(records, start=1):
         location = f"storyboard shot {index}"
@@ -336,7 +598,7 @@ def validate_storyboard(
         base_id = _base_shot_id(shot_id)
         if base_id is None:
             errors.append(
-                f"{location}.SHOT_ID must match S##_SH## with an optional A-Z suffix: "
+                f"{location}.SHOT_ID must match S##_SH## with an optional A/B/C suffix: "
                 f"{shot_id!r}"
             )
         else:
@@ -372,6 +634,7 @@ def validate_storyboard(
             )
         else:
             start, end = time_code
+            timecode_by_shot[shot_id] = time_code
             if previous_end is not None and not math.isclose(
                 start, previous_end, rel_tol=0.0, abs_tol=0.001
             ):
@@ -408,83 +671,228 @@ def validate_storyboard(
                     f"{', '.join(unknown)}"
                 )
 
-        dialogue = record.get("DIALOGUE", "")
-        if isinstance(dialogue, str) and "无台词" in dialogue:
-            if "刻意沉默" not in dialogue:
+        for field, value in record.items():
+            if field.startswith("__") or field in {"POST_TEXT", "DIALOGUE"}:
+                continue
+            if not isinstance(value, str):
+                continue
+            for pattern in UI_TEXT_PATTERNS:
+                if pattern.search(value):
+                    errors.append(
+                        f"{location} {shot_id}.{field} contains exact UI/paper text; "
+                        "move it to POST_TEXT"
+                    )
+                    break
+
+        dialogue_entries, dialogue_errors = _parse_dialogue_field(record.get("DIALOGUE"))
+        for dialogue_error in dialogue_errors:
+            errors.append(f"{location} {shot_id}: {dialogue_error}")
+
+        timing_entries, timing_errors = _parse_timing_field(
+            record.get("DIALOGUE_TIMING")
+        )
+        for timing_error in timing_errors:
+            errors.append(f"{location} {shot_id}: {timing_error}")
+        timing_by_shot[shot_id] = []
+
+        if not dialogue_entries:
+            if timing_entries:
                 errors.append(
-                    f"{location} {shot_id}.DIALOGUE must explain the deliberate silence"
+                    f"{location} {shot_id}: silent DIALOGUE cannot have speaking timing entries"
                 )
-        elif isinstance(dialogue, str):
-            quoted_texts = [
-                first or second
-                for first, second in _QUOTED_TEXT_RE.findall(dialogue)
-            ]
-            for quoted_text in quoted_texts:
-                if quoted_text not in source_text:
-                    errors.append(
-                        f"{location} {shot_id}.DIALOGUE contains non-source quoted text: "
-                        f"{quoted_text!r}"
-                    )
-
-        intervals = _parse_dialogue_intervals(record.get("DIALOGUE_TIMING"))
-        if isinstance(dialogue, str) and "无台词" not in dialogue and not intervals:
+        elif len(dialogue_entries) != len(timing_entries):
             errors.append(
-                f"{location} {shot_id}.DIALOGUE_TIMING must contain an interval"
+                f"{location} {shot_id}: DIALOGUE has {len(dialogue_entries)} entries but "
+                f"DIALOGUE_TIMING has {len(timing_entries)} entries"
             )
-        if duration is not None:
-            for start, end in intervals:
-                if start < 0 or end < start or end > duration + 0.001:
+
+        if dialogue_entries and timing_entries:
+            previous_timing: dict[str, Any] | None = None
+            for entry_index, (dialogue_entry, timing_entry) in enumerate(
+                zip(dialogue_entries, timing_entries), start=1
+            ):
+                if (
+                    dialogue_entry.get("speaker") != timing_entry.get("speaker")
+                    or dialogue_entry.get("delivery") != timing_entry.get("delivery")
+                ):
                     errors.append(
-                        f"{location} {shot_id}.DIALOGUE_TIMING interval "
-                        f"{start:g}-{end:g}s exceeds shot duration {duration:g}s"
+                        f"{location} {shot_id}: DIALOGUE_TIMING entry {entry_index} "
+                        "does not match DIALOGUE speaker/delivery"
                     )
 
-    # The base ID is the lock contract. A/B/C suffixes are a continuous group,
-    # so one locked line can be placed in any one of those actual shot cards.
-    mapped_count = 0
+                start = float(timing_entry["start"])
+                end = float(timing_entry["end"])
+                before = float(timing_entry["before"])
+                after = float(timing_entry["after"])
+                timing_entry["start_s"] = start
+                timing_entry["end_s"] = end
+                timing_entry["before_s"] = before
+                timing_entry["after_s"] = after
+                timing_by_shot[shot_id].append(timing_entry)
+
+                if start < 0 or end <= start:
+                    errors.append(
+                        f"{location} {shot_id}: DIALOGUE_TIMING entry {entry_index} "
+                        "must have a positive interval"
+                    )
+                if duration is not None and end > duration + 0.001:
+                    errors.append(
+                        f"{location} {shot_id}: DIALOGUE_TIMING entry {entry_index} "
+                        f"ends at {end:g}s beyond shot duration {duration:g}s"
+                    )
+                if not 0.3 <= before <= 0.8:
+                    errors.append(
+                        f"{location} {shot_id}: entry {entry_index} before reaction "
+                        f"must be 0.3-0.8s, got {before:g}s"
+                    )
+                if not 0.3 <= after <= 0.8:
+                    errors.append(
+                        f"{location} {shot_id}: entry {entry_index} after reaction "
+                        f"must be 0.3-0.8s, got {after:g}s"
+                    )
+
+                minimum = _minimum_speech_duration(
+                    dialogue_entry["text"], dialogue_entry["delivery"]
+                )
+                if end - start + 0.001 < minimum:
+                    errors.append(
+                        f"{location} {shot_id}: entry {entry_index} speech window "
+                        f"{end - start:.2f}s is shorter than conservative minimum "
+                        f"{minimum:.2f}s for {len(dialogue_entry['text'])} characters"
+                    )
+
+                if previous_timing is None:
+                    if start + 0.001 < before:
+                        errors.append(
+                            f"{location} {shot_id}: first speech entry starts before "
+                            "its before-reaction window ends"
+                        )
+                else:
+                    gap = start - float(previous_timing["end_s"])
+                    required_gap = max(
+                        float(previous_timing["after_s"]), before
+                    )
+                    if gap + 0.001 < required_gap:
+                        errors.append(
+                            f"{location} {shot_id}: entries {entry_index - 1} and "
+                            f"{entry_index} have only {gap:.2f}s reaction gap; "
+                            f"need {required_gap:.2f}s"
+                        )
+                previous_timing = timing_entry
+
+                if base_id is not None:
+                    actual_dialogue.append(
+                        (
+                            base_id,
+                            dialogue_entry["speaker"],
+                            dialogue_entry["delivery"],
+                            dialogue_entry["text"],
+                        )
+                    )
+            if duration is not None and timing_by_shot[shot_id]:
+                final_timing = timing_by_shot[shot_id][-1]
+                if duration - final_timing["end_s"] + 0.001 < final_timing["after_s"]:
+                    errors.append(
+                        f"{location} {shot_id}: final speech entry leaves less than its "
+                        "required after-reaction window"
+                    )
+
+        if "EVENT_TIMING" in record:
+            events, event_errors = _parse_event_timing(record["EVENT_TIMING"])
+            for event_error in event_errors:
+                errors.append(f"{location} {shot_id}: {event_error}")
+            if duration is not None:
+                for event_name, event_time in events.items():
+                    if event_time < 0 or event_time > duration + 0.001:
+                        errors.append(
+                            f"{location} {shot_id}: event {event_name} at {event_time:g}s "
+                            f"is outside shot duration {duration:g}s"
+                        )
+            event_by_shot[shot_id] = events
+
+    expected_dialogue: Counter[tuple[str, str, str, str]] = Counter()
     for index, locked in enumerate(locked_records, start=1):
-        location = f"locked_lines[{index}]"
         if not isinstance(locked, dict):
             continue
         base_id = _base_shot_id(locked.get("shot_id"))
         if base_id is None:
-            continue
-        group = dialogue_by_base.get(base_id, [])
-        if not group:
             errors.append(
-                f"{location} shot_id {locked.get('shot_id')!r} has no storyboard shot "
-                f"group (expected base ID {base_id})"
+                f"locked_lines[{index}].shot_id must match S##_SH## with an optional A/B/C suffix"
             )
             continue
+        expected_dialogue[
+            (
+                base_id,
+                str(locked.get("speaker_id", "")),
+                str(locked.get("delivery", "")),
+                str(locked.get("text", "")),
+            )
+        ] += 1
 
-        text = locked.get("text")
-        speaker_id = locked.get("speaker_id")
-        delivery = locked.get("delivery")
-        matches = [
-            record
-            for record in group
-            if isinstance(record.get("DIALOGUE"), str)
-            and isinstance(text, str)
-            and text in record["DIALOGUE"]
-        ]
-        if not matches:
-            errors.append(
-                f"{location} {base_id} dialogue is not mapped verbatim to its storyboard "
-                f"group: {text!r}"
-            )
-            continue
+    actual_counter = Counter(actual_dialogue)
+    missing_dialogue = expected_dialogue - actual_counter
+    extra_dialogue = actual_counter - expected_dialogue
+    for item, count in missing_dialogue.items():
+        errors.append(f"dialogue closed set missing {count} occurrence(s): {item!r}")
+    for item, count in extra_dialogue.items():
+        errors.append(f"dialogue closed set has {count} unexpected occurrence(s): {item!r}")
 
-        mapped_count += 1
-        matching_dialogue = "\n".join(record.get("DIALOGUE", "") for record in matches)
-        if isinstance(speaker_id, str) and speaker_id not in matching_dialogue:
+    def global_event(shot_id: str, event_name: str) -> float | None:
+        events = event_by_shot.get(shot_id)
+        time_code = timecode_by_shot.get(shot_id)
+        if events is None or event_name not in events or time_code is None:
+            return None
+        return time_code[0] + events[event_name]
+
+    required_events = {
+        "S03_SH04A": ("wood_frame_complete",),
+        "S03_SH04B": ("bell_start", "bell_tail_end", "fall_start"),
+        "S03_SH04C": ("fall_continues", "medal_slide_start"),
+        "S06_SH01B": ("near_kill_complete", "dialogue_start"),
+    }
+    for shot_id, event_names in required_events.items():
+        events = event_by_shot.get(shot_id)
+        if events is None:
+            errors.append(f"{shot_id} requires EVENT_TIMING for causal ordering")
+            continue
+        for event_name in event_names:
+            if event_name not in events:
+                errors.append(f"{shot_id} EVENT_TIMING missing {event_name}")
+
+    wood_frame = global_event("S03_SH04A", "wood_frame_complete")
+    bell_start = global_event("S03_SH04B", "bell_start")
+    bell_tail_end = event_by_shot.get("S03_SH04B", {}).get("bell_tail_end")
+    fall_start = event_by_shot.get("S03_SH04B", {}).get("fall_start")
+    if wood_frame is not None and bell_start is not None and wood_frame > bell_start + 0.001:
+        errors.append("S03 wood frame must complete before the bell starts")
+    if bell_tail_end is not None and fall_start is not None:
+        if fall_start < bell_tail_end + 0.1:
             errors.append(
-                f"{location} {base_id} maps text to a shot without speaker "
-                f"{speaker_id}: {text!r}"
+                "S03_SH04B requires a complete bell tail and at least 0.1s pause "
+                "before fall_start"
             )
-        if isinstance(delivery, str) and delivery not in matching_dialogue:
+    fall_global = global_event("S03_SH04B", "fall_start")
+    medal_global = global_event("S03_SH04C", "medal_slide_start")
+    if fall_global is not None and medal_global is not None and medal_global <= fall_global:
+        errors.append("S03 medal slide must occur after the fall has started")
+
+    s06_events = event_by_shot.get("S06_SH01B")
+    s06_timing = timing_by_shot.get("S06_SH01B", [])
+    if s06_events is not None and s06_timing:
+        near_kill = s06_events.get("near_kill_complete")
+        dialogue_start = s06_events.get("dialogue_start")
+        actual_start = s06_timing[0]["start_s"]
+        if dialogue_start is not None and actual_start + 0.001 < dialogue_start:
             errors.append(
-                f"{location} {base_id} maps text to a shot without delivery "
-                f"{delivery}: {text!r}"
+                "S06_SH01B DIALOGUE_TIMING starts before its dialogue_start event"
+            )
+        if (
+            near_kill is not None
+            and dialogue_start is not None
+            and dialogue_start < near_kill + 0.3
+        ):
+            errors.append(
+                "S06_SH01B needs at least 0.3s after near_kill_complete before the call"
             )
 
     stats = {
@@ -493,7 +901,7 @@ def validate_storyboard(
         "base_shot_count": len(dialogue_by_base),
         "duration_total": sum(durations),
         "required_field_count": len(STORYBOARD_REQUIRED_FIELDS),
-        "mapped_count": mapped_count,
+        "mapped_count": sum((expected_dialogue & actual_counter).values()),
         "locked_count": len(locked_records),
     }
     return errors, stats
@@ -526,6 +934,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.storyboard is not None:
         storyboard_text, storyboard_load_errors = _load_storyboard(args.storyboard)
         errors.extend(storyboard_load_errors)
+        provenance_errors: list[str] = []
+        anchor_ids: set[str] | None = None
+        if storyboard_text is not None and not storyboard_load_errors:
+            provenance_errors, anchor_ids = _validate_provenance(
+                storyboard_text, args.storyboard
+            )
+            errors.extend(provenance_errors)
         if (
             storyboard_text is not None
             and source_text is not None
@@ -536,22 +951,30 @@ def main(argv: list[str] | None = None) -> int:
                 storyboard_text,
                 source_text,
                 payload,
-                anchor_ids=_anchor_ids_near_storyboard(args.storyboard),
+                anchor_ids=anchor_ids,
             )
             errors.extend(storyboard_errors)
 
     if errors:
-        print(f"FAIL: dialogue lock validation failed ({len(errors)} error(s))")
+        failure_kind = (
+            "storyboard validation" if args.storyboard is not None else "dialogue lock validation"
+        )
+        print(f"FAIL: {failure_kind} failed ({len(errors)} error(s))")
         for error in errors:
             print(f"- {error}")
         return 1
 
     records = payload["locked_lines"]
-    print(
-        f"PASS: {len(records)} locked dialogue lines; "
-        f"all {len(records)} source texts match verbatim."
-    )
-    if storyboard_stats is not None:
+    if storyboard_stats is None:
+        print(
+            f"DIALOGUE-ONLY PASS: {len(records)} locked dialogue lines; "
+            f"all {len(records)} source texts match verbatim."
+        )
+    else:
+        print(
+            f"PASS: {len(records)} locked dialogue lines; "
+            f"all {len(records)} source texts match verbatim."
+        )
         print(
             f"PASS: storyboard {storyboard_stats['shot_count']} actual shots / "
             f"{storyboard_stats['base_shot_count']} base beat groups; "
