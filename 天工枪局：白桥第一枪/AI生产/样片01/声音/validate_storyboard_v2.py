@@ -57,6 +57,51 @@ STORYBOARD_REQUIRED_FIELDS = (
     "NEGATIVE",
 )
 
+KEYFRAME_REQUIRED_FIELDS = (
+    "SHOT_ID",
+    "REFERENCE_IMAGES",
+    "ANCHOR_REFS",
+    "KEYFRAME_MOMENT",
+    "KEYFRAME_PROMPT",
+    "KEYFRAME_NEGATIVE",
+    "POST_TEXT",
+    "FRAME_ROLE",
+    "CONTINUITY_CHECK",
+)
+
+# This suffix is deliberately literal.  Keeping it stable makes accidental
+# style drift visible before a prompt reaches an image model.
+KEYFRAME_STYLE_SUFFIX = (
+    "16:9 横屏，1920×1080，高完成度电影级 3D 国漫，真实人体比例与可触摸材质；"
+    "非廉价游戏截图、非塑料皮肤、非二维平涂、非真人照片。"
+)
+KEYFRAME_NEGATIVE_REQUIRED_TERMS = (
+    "文字",
+    "水印",
+    "字幕",
+    "随机 UI",
+    "廉价游戏截图",
+    "塑料皮肤",
+    "二维平涂",
+    "真人照片",
+)
+KEYFRAME_MULTI_MOMENT_PATTERNS = (
+    ("随后", re.compile(r"随后")),
+    ("然后", re.compile(r"然后")),
+    ("逐渐", re.compile(r"逐渐")),
+    ("开始到结束", re.compile(r"开始到结束")),
+    ("先…再…", re.compile(r"先[^。；;，,！？!?]{0,40}再")),
+)
+_KEYFRAME_PATH_REF_RE = re.compile(
+    r"^(?P<anchor>[ABC]\d+)\s*->\s*(?P<path>/.*?)\s*"
+    r"\[\s*SHA-256:\s*(?P<sha>[0-9a-fA-F]{64})\s*\]$"
+)
+_KEYFRAME_PENDING_REF_RE = re.compile(r"^待生成\s*[：:]\s*(?P<anchor>[ABC]\d+)$")
+_KEYFRAME_QUOTED_TEXT_RE = re.compile(r"[“\"]([^“”\"]{2,})[”\"]")
+_KEYFRAME_VISIBLE_NAME_RE = re.compile(
+    r"周野|苏禾|江宁|唐夏|许安|韩平|陈默|赵雨|林溪|顾遥|罗叔|纪秋|夏满"
+)
+
 _SHOT_ID_RE = re.compile(r"^(S\d+_SH\d+)([ABC])?$")
 _DURATION_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(?:s|秒)?\s*$")
 _TIME_CODE_RE = re.compile(
@@ -248,6 +293,13 @@ def _load_storyboard(path: Path) -> tuple[str | None, list[str]]:
         return None, [f"cannot read storyboard {path}: {exc}"]
 
 
+def _load_keyframes(path: Path) -> tuple[str | None, list[str]]:
+    try:
+        return path.read_text(encoding="utf-8"), []
+    except (OSError, UnicodeError) as exc:
+        return None, [f"cannot read keyframes {path}: {exc}"]
+
+
 def _parse_storyboard(text: str) -> tuple[list[dict[str, Any]], list[str]]:
     """Parse one-line ``FIELD: value`` cards from the storyboard Markdown."""
 
@@ -292,6 +344,96 @@ def _parse_storyboard(text: str) -> tuple[list[dict[str, Any]], list[str]]:
     if not records:
         errors.append("storyboard contains no SHOT_ID blocks")
     return records, errors
+
+
+def _parse_keyframes(text: str) -> tuple[list[dict[str, Any]], list[str]]:
+    """Parse one-line ``FIELD: value`` cards from the keyframe Markdown."""
+
+    records: list[dict[str, Any]] = []
+    errors: list[str] = []
+    current: dict[str, Any] | None = None
+
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        if re.match(r"^###\s+(?:关键帧|KEYFRAME)\b", line):
+            if current is not None:
+                records.append(current)
+            current = {"__line": line_number}
+            continue
+
+        field_match = re.match(r"^([A-Z][A-Z0-9_]*):\s*(.*)$", line)
+        if not field_match:
+            continue
+
+        field, value = field_match.groups()
+        if field == "SHOT_ID":
+            if current is None:
+                current = {"__line": line_number}
+            elif "SHOT_ID" in current:
+                records.append(current)
+                current = {"__line": line_number}
+            current["SHOT_ID"] = value.strip()
+            continue
+
+        if current is None:
+            continue
+
+        if field in current:
+            errors.append(
+                f"keyframe line {line_number} repeats field {field} for "
+                f"{current.get('SHOT_ID') or '<blank shot>'}"
+            )
+        current[field] = value.strip()
+
+    if current is not None:
+        records.append(current)
+
+    if not records:
+        errors.append("keyframe file contains no SHOT_ID blocks")
+    return records, errors
+
+
+def _parse_anchor_catalog(text: str) -> dict[str, dict[str, str | None]]:
+    """Extract anchor status, absolute master path, and locked SHA values."""
+
+    metadata: dict[str, dict[str, str | None]] = {}
+    headings = list(
+        re.finditer(r"^###\s+([ABC]\d+)\s+.*$", text, flags=re.MULTILINE)
+    )
+    for index, heading in enumerate(headings):
+        anchor_id = heading.group(1)
+        end = headings[index + 1].start() if index + 1 < len(headings) else len(text)
+        block = text[heading.start() : end]
+        status_match = re.search(r"^- 母版状态：([^\n]+)", block, flags=re.MULTILINE)
+        path_match = re.search(r"^- 母版路径：([^\n]+)", block, flags=re.MULTILINE)
+        sha_match = re.search(
+            r"^- 母版 SHA-256：`?([0-9a-fA-F]{64})`?",
+            block,
+            flags=re.MULTILINE,
+        )
+
+        status = status_match.group(1).strip() if status_match else None
+        path: str | None = None
+        if path_match is not None:
+            path_value = path_match.group(1).strip()
+            if not path_value.startswith("待生成"):
+                path = path_value.strip("`").strip()
+
+        metadata[anchor_id] = {
+            "status": status,
+            "path": path,
+            "sha256": sha_match.group(1).lower() if sha_match else None,
+        }
+    return metadata
+
+
+def _anchor_metadata_near_storyboard(path: Path) -> dict[str, dict[str, str | None]] | None:
+    anchor_path = path.parent / "第01章_样片锚点清单_重制版.md"
+    try:
+        text = anchor_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    metadata = _parse_anchor_catalog(text)
+    return metadata or None
 
 
 def _parse_storyboard_header(text: str) -> tuple[dict[str, str], list[str]]:
@@ -1089,6 +1231,354 @@ def validate_storyboard(
     return errors, stats
 
 
+def _parse_keyframe_reference_images(
+    value: Any,
+) -> tuple[list[dict[str, str]], list[str]]:
+    """Parse path-plus-SHA references and explicit pending-anchor markers."""
+
+    if not isinstance(value, str) or not value.strip():
+        return [], ["REFERENCE_IMAGES must be a non-empty string"]
+
+    entries: list[dict[str, str]] = []
+    errors: list[str] = []
+    seen: set[str] = set()
+    parts = [part.strip() for part in re.split(r"[;；]", value) if part.strip()]
+    if not parts:
+        return [], ["REFERENCE_IMAGES must contain at least one reference entry"]
+
+    for part in parts:
+        path_match = _KEYFRAME_PATH_REF_RE.fullmatch(part)
+        if path_match is not None:
+            entry = {
+                "kind": "path",
+                "anchor": path_match.group("anchor"),
+                "path": path_match.group("path").strip(),
+                "sha256": path_match.group("sha").lower(),
+            }
+        else:
+            pending_match = _KEYFRAME_PENDING_REF_RE.fullmatch(part)
+            if pending_match is None:
+                errors.append(
+                    "REFERENCE_IMAGES has malformed entry; use "
+                    "<ANCHOR> -> /absolute/path [SHA-256: <digest>] or 待生成：<ANCHOR>: "
+                    f"{part!r}"
+                )
+                continue
+            entry = {
+                "kind": "pending",
+                "anchor": pending_match.group("anchor"),
+            }
+
+        anchor_id = entry["anchor"]
+        if anchor_id in seen:
+            errors.append(f"REFERENCE_IMAGES repeats anchor {anchor_id}")
+        seen.add(anchor_id)
+        entries.append(entry)
+    return entries, errors
+
+
+def _prompt_score_literals(value: str) -> list[str]:
+    """Return score-like literals while allowing the required 16:9 canvas tag."""
+
+    return [
+        match.group(0)
+        for match in SCORE_TEXT_PATTERN.finditer(value)
+        if match.group(0).replace("：", ":") != "16:9"
+    ]
+
+
+def _keyframe_text_literals(storyboard_records: list[dict[str, Any]]) -> set[str]:
+    literals: set[str] = set()
+    for record in storyboard_records:
+        dialogue_entries, _ = _parse_dialogue_field(record.get("DIALOGUE"))
+        literals.update(
+            entry["text"] for entry in dialogue_entries if entry.get("text")
+        )
+        post_text = record.get("POST_TEXT")
+        if isinstance(post_text, str):
+            literals.update(_KEYFRAME_QUOTED_TEXT_RE.findall(post_text))
+    return {literal for literal in literals if len(literal) >= 2}
+
+
+def validate_keyframes(
+    keyframe_text: str,
+    storyboard_text: str,
+    *,
+    anchor_metadata: dict[str, dict[str, str | None]] | None = None,
+) -> tuple[list[str], dict[str, Any]]:
+    """Validate the source-locked, one-card-per-shot keyframe prompt file."""
+
+    keyframe_records, errors = _parse_keyframes(keyframe_text)
+    storyboard_records, storyboard_parse_errors = _parse_storyboard(storyboard_text)
+    errors.extend(storyboard_parse_errors)
+    if errors:
+        return errors, {
+            "records": keyframe_records,
+            "keyframe_count": len(keyframe_records),
+            "blocked_count": 0,
+        }
+
+    storyboard_ids = [
+        str(record.get("SHOT_ID", "")).strip()
+        for record in storyboard_records
+        if str(record.get("SHOT_ID", "")).strip()
+    ]
+    keyframe_ids = [
+        str(record.get("SHOT_ID", "")).strip()
+        for record in keyframe_records
+        if str(record.get("SHOT_ID", "")).strip()
+    ]
+    if keyframe_ids != storyboard_ids:
+        expected_counter = Counter(storyboard_ids)
+        actual_counter = Counter(keyframe_ids)
+        missing = expected_counter - actual_counter
+        extra = actual_counter - expected_counter
+        if missing:
+            errors.append(
+                "keyframe ID set is missing shot(s): "
+                + ", ".join(
+                    f"{shot_id} x{count}" if count > 1 else shot_id
+                    for shot_id, count in missing.items()
+                )
+            )
+        if extra:
+            errors.append(
+                "keyframe ID set has unexpected shot(s): "
+                + ", ".join(
+                    f"{shot_id} x{count}" if count > 1 else shot_id
+                    for shot_id, count in extra.items()
+                )
+            )
+        if len(keyframe_ids) == len(set(keyframe_ids)):
+            errors.append("keyframe IDs must be in the same order as storyboard SHOT_IDs")
+
+    seen_keyframe_ids: dict[str, int] = {}
+    storyboard_by_id: dict[str, dict[str, Any]] = {}
+    for index, record in enumerate(storyboard_records, start=1):
+        shot_id = record.get("SHOT_ID")
+        if isinstance(shot_id, str) and shot_id.strip():
+            storyboard_by_id.setdefault(shot_id.strip(), record)
+
+    exact_literals = _keyframe_text_literals(storyboard_records)
+    blocked_count = 0
+
+    for index, record in enumerate(keyframe_records, start=1):
+        location = f"keyframe shot {index}"
+        shot_id = record.get("SHOT_ID")
+        if not isinstance(shot_id, str) or not shot_id.strip():
+            errors.append(f"{location} has an empty SHOT_ID")
+            continue
+        shot_id = shot_id.strip()
+        record["SHOT_ID"] = shot_id
+        if shot_id in seen_keyframe_ids:
+            errors.append(
+                f"{location} duplicates SHOT_ID {shot_id} from keyframe shot "
+                f"{seen_keyframe_ids[shot_id]}"
+            )
+        else:
+            seen_keyframe_ids[shot_id] = index
+
+        missing = [field for field in KEYFRAME_REQUIRED_FIELDS if field not in record]
+        if missing:
+            errors.append(
+                f"{location} {shot_id} missing field(s): {', '.join(missing)}"
+            )
+        empty = [
+            field
+            for field in KEYFRAME_REQUIRED_FIELDS
+            if field in record and not str(record[field]).strip()
+        ]
+        if empty:
+            errors.append(
+                f"{location} {shot_id} has empty field(s): {', '.join(empty)}"
+            )
+
+        storyboard_record = storyboard_by_id.get(shot_id)
+        if storyboard_record is None:
+            errors.append(f"{location} {shot_id} has no matching storyboard shot")
+            continue
+
+        storyboard_refs = _ANCHOR_RE.findall(
+            str(storyboard_record.get("ANCHOR_REFS", ""))
+        )
+        keyframe_refs = _ANCHOR_RE.findall(str(record.get("ANCHOR_REFS", "")))
+        if len(keyframe_refs) != len(set(keyframe_refs)):
+            errors.append(f"{location} {shot_id}.ANCHOR_REFS repeats an anchor")
+        if keyframe_refs != storyboard_refs:
+            errors.append(
+                f"{location} {shot_id}.ANCHOR_REFS must exactly match storyboard: "
+                f"expected {', '.join(storyboard_refs)}, got {', '.join(keyframe_refs)}"
+            )
+
+        for field in ("KEYFRAME_MOMENT", "POST_TEXT"):
+            expected = str(storyboard_record.get(field, ""))
+            actual = str(record.get(field, ""))
+            if actual != expected:
+                errors.append(
+                    f"{location} {shot_id}.{field} must exactly match storyboard"
+                )
+
+        expected_continuity = (
+            f"IN={storyboard_record.get('CONTINUITY_IN', '')}；"
+            f"OUT={storyboard_record.get('CONTINUITY_OUT', '')}"
+        )
+        if record.get("CONTINUITY_CHECK") != expected_continuity:
+            errors.append(
+                f"{location} {shot_id}.CONTINUITY_CHECK must encode storyboard "
+                "CONTINUITY_IN and CONTINUITY_OUT exactly"
+            )
+
+        reference_entries, reference_errors = _parse_keyframe_reference_images(
+            record.get("REFERENCE_IMAGES")
+        )
+        errors.extend(f"{location} {shot_id}: {error}" for error in reference_errors)
+        reference_ids = [entry["anchor"] for entry in reference_entries]
+        if reference_ids != storyboard_refs:
+            errors.append(
+                f"{location} {shot_id}.REFERENCE_IMAGES anchors must exactly match "
+                "ANCHOR_REFS"
+            )
+
+        pending_ids = {
+            entry["anchor"] for entry in reference_entries if entry["kind"] == "pending"
+        }
+        if pending_ids:
+            blocked_count += 1
+            frame_role = str(record.get("FRAME_ROLE", ""))
+            if "BLOCKED_BY_ANCHOR" not in frame_role:
+                errors.append(
+                    f"{location} {shot_id} must be marked BLOCKED_BY_ANCHOR for "
+                    f"pending anchor(s): {', '.join(sorted(pending_ids))}"
+                )
+        elif "BLOCKED_BY_ANCHOR" in str(record.get("FRAME_ROLE", "")):
+            errors.append(
+                f"{location} {shot_id} must not be BLOCKED_BY_ANCHOR when all "
+                "anchors are available"
+            )
+
+        if anchor_metadata is None:
+            errors.append(
+                f"{location} {shot_id}: anchor catalog is unavailable; cannot "
+                "validate REFERENCE_IMAGES status"
+            )
+        else:
+            for entry in reference_entries:
+                anchor_id = entry["anchor"]
+                metadata = anchor_metadata.get(anchor_id)
+                if metadata is None:
+                    errors.append(
+                        f"{location} {shot_id}: REFERENCE_IMAGES contains unknown "
+                        f"anchor {anchor_id}"
+                    )
+                    continue
+                status = metadata.get("status")
+                if status == "可用":
+                    if entry["kind"] != "path":
+                        errors.append(
+                            f"{location} {shot_id}: available anchor {anchor_id} "
+                            "must use an absolute master path, not 待生成"
+                        )
+                        continue
+                    expected_path = metadata.get("path")
+                    expected_sha = metadata.get("sha256")
+                    actual_path = entry.get("path", "")
+                    actual_sha = entry.get("sha256", "")
+                    if not Path(actual_path).is_absolute():
+                        errors.append(
+                            f"{location} {shot_id}: reference path for {anchor_id} "
+                            "must be absolute"
+                        )
+                    if expected_path is None or actual_path != expected_path:
+                        errors.append(
+                            f"{location} {shot_id}: reference path for {anchor_id} "
+                            "does not match anchor catalog"
+                        )
+                    if expected_sha is None or actual_sha != expected_sha:
+                        errors.append(
+                            f"{location} {shot_id}: reference SHA for {anchor_id} "
+                            "does not match anchor catalog lock"
+                        )
+                    path = Path(actual_path)
+                    if not path.is_file():
+                        errors.append(
+                            f"{location} {shot_id}: reference image for {anchor_id} "
+                            f"does not exist: {actual_path}"
+                        )
+                    elif expected_sha is not None:
+                        actual_file_sha = _sha256(path)
+                        if actual_file_sha != expected_sha:
+                            errors.append(
+                                f"{location} {shot_id}: reference image SHA for "
+                                f"{anchor_id} does not match anchor catalog lock"
+                            )
+                elif status == "待生成":
+                    if entry["kind"] != "pending":
+                        errors.append(
+                            f"{location} {shot_id}: pending anchor {anchor_id} "
+                            "must be written as 待生成：<ANCHOR>; fake paths are forbidden"
+                        )
+                else:
+                    errors.append(
+                        f"{location} {shot_id}: anchor {anchor_id} has an invalid "
+                        f"母版状态: {status!r}"
+                    )
+
+        prompt = str(record.get("KEYFRAME_PROMPT", ""))
+        negative = str(record.get("KEYFRAME_NEGATIVE", ""))
+        if prompt and not prompt.endswith(KEYFRAME_STYLE_SUFFIX):
+            errors.append(
+                f"{location} {shot_id}.KEYFRAME_PROMPT must end with the unified "
+                "16:9/3D国漫 style suffix"
+            )
+        for term, pattern in KEYFRAME_MULTI_MOMENT_PATTERNS:
+            if pattern.search(prompt):
+                errors.append(
+                    f"{location} {shot_id}.KEYFRAME_PROMPT contains multi-moment "
+                    f"term {term!r}; describe one static instant only"
+                )
+
+        for field_name, value in (
+            ("KEYFRAME_PROMPT", prompt),
+            ("KEYFRAME_NEGATIVE", negative),
+        ):
+            for literal in sorted(exact_literals, key=len, reverse=True):
+                if literal in value:
+                    errors.append(
+                        f"{location} {shot_id}.{field_name} leaks exact dialogue or "
+                        f"POST_TEXT literal: {literal!r}"
+                    )
+            for score in _prompt_score_literals(value):
+                errors.append(
+                    f"{location} {shot_id}.{field_name} leaks exact score/UI text: "
+                    f"{score!r}; keep it in POST_TEXT"
+                )
+            name_match = _KEYFRAME_VISIBLE_NAME_RE.search(value)
+            if name_match is not None:
+                errors.append(
+                    f"{location} {shot_id}.{field_name} contains visible name "
+                    f"{name_match.group(0)!r}; keep exact names in POST_TEXT"
+                )
+
+        missing_negative_terms = [
+            term
+            for term in KEYFRAME_NEGATIVE_REQUIRED_TERMS
+            if term not in negative
+        ]
+        if missing_negative_terms:
+            errors.append(
+                f"{location} {shot_id}.KEYFRAME_NEGATIVE missing unified safety term(s): "
+                + ", ".join(missing_negative_terms)
+            )
+
+    stats = {
+        "records": keyframe_records,
+        "keyframe_count": len(keyframe_records),
+        "blocked_count": blocked_count,
+        "storyboard_count": len(storyboard_records),
+    }
+    return errors, stats
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Validate a source-locked chapter-1 dialogue JSON file."
@@ -1100,6 +1590,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="optional source-locked storyboard Markdown",
     )
+    parser.add_argument(
+        "--keyframes",
+        type=Path,
+        help="optional source-locked keyframe prompt Markdown",
+    )
     return parser
 
 
@@ -1109,6 +1604,7 @@ def main(argv: list[str] | None = None) -> int:
     payload, dialogue_errors = _load_dialogue(args.dialogue)
     errors = [*source_errors, *dialogue_errors]
     storyboard_stats: dict[str, Any] | None = None
+    keyframe_stats: dict[str, Any] | None = None
 
     if source_text is not None and not dialogue_errors:
         errors.extend(validate(source_text, payload))
@@ -1118,6 +1614,7 @@ def main(argv: list[str] | None = None) -> int:
         errors.extend(storyboard_load_errors)
         provenance_errors: list[str] = []
         anchor_ids: set[str] | None = None
+        anchor_metadata: dict[str, dict[str, str | None]] | None = None
         if storyboard_text is not None and not storyboard_load_errors:
             provenance_errors, anchor_ids = _validate_provenance(
                 storyboard_text,
@@ -1126,6 +1623,7 @@ def main(argv: list[str] | None = None) -> int:
                 dialogue_path=args.dialogue,
             )
             errors.extend(provenance_errors)
+            anchor_metadata = _anchor_metadata_near_storyboard(args.storyboard)
         if (
             storyboard_text is not None
             and source_text is not None
@@ -1139,6 +1637,24 @@ def main(argv: list[str] | None = None) -> int:
                 anchor_ids=anchor_ids,
             )
             errors.extend(storyboard_errors)
+
+        if args.keyframes is not None:
+            keyframe_text, keyframe_load_errors = _load_keyframes(args.keyframes)
+            errors.extend(keyframe_load_errors)
+            if (
+                keyframe_text is not None
+                and storyboard_text is not None
+                and not keyframe_load_errors
+                and not storyboard_load_errors
+            ):
+                keyframe_errors, keyframe_stats = validate_keyframes(
+                    keyframe_text,
+                    storyboard_text,
+                    anchor_metadata=anchor_metadata,
+                )
+                errors.extend(keyframe_errors)
+    elif args.keyframes is not None:
+        errors.append("--keyframes requires --storyboard so shot IDs can be source-locked")
 
     if errors:
         failure_kind = (
@@ -1170,6 +1686,12 @@ def main(argv: list[str] | None = None) -> int:
             f"dialogue mapping {storyboard_stats['mapped_count']}/"
             f"{storyboard_stats['locked_count']}."
         )
+        if keyframe_stats is not None:
+            print(
+                f"PASS: keyframes {keyframe_stats['keyframe_count']}/"
+                f"{keyframe_stats['storyboard_count']} shot IDs; "
+                f"{keyframe_stats['blocked_count']} BLOCKED_BY_ANCHOR pending-anchor cards."
+            )
     return 0
 
 
