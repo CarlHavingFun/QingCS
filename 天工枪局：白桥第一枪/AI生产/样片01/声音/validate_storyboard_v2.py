@@ -62,6 +62,7 @@ KEYFRAME_REQUIRED_FIELDS = (
     "REFERENCE_IMAGES",
     "ANCHOR_REFS",
     "KEYFRAME_MOMENT",
+    "VISIBLE_FACT_LOCK",
     "KEYFRAME_PROMPT",
     "KEYFRAME_NEGATIVE",
     "POST_TEXT",
@@ -91,6 +92,8 @@ KEYFRAME_MULTI_MOMENT_PATTERNS = (
     ("逐渐", re.compile(r"逐渐")),
     ("开始到结束", re.compile(r"开始到结束")),
     ("先…再…", re.compile(r"先[^。；;，,！？!?]{0,40}再")),
+    ("同时…随后…", re.compile(r"同时[^。！？!?]{0,80}随后")),
+    ("已…并…然后…", re.compile(r"已[^。！？!?]{0,80}并[^。！？!?]{0,80}然后")),
 )
 _KEYFRAME_PATH_REF_RE = re.compile(
     r"^(?P<anchor>[ABC]\d+)\s*->\s*(?P<path>/.*?)\s*"
@@ -101,6 +104,7 @@ _KEYFRAME_QUOTED_TEXT_RE = re.compile(r"[“\"]([^“”\"]{2,})[”\"]")
 _KEYFRAME_VISIBLE_NAME_RE = re.compile(
     r"周野|苏禾|江宁|唐夏|许安|韩平|陈默|赵雨|林溪|顾遥|罗叔|纪秋|夏满"
 )
+_ACTION_STATE_SPLIT_RE = re.compile(r"[，；。！？,;!?]")
 
 _SHOT_ID_RE = re.compile(r"^(S\d+_SH\d+)([ABC])?$")
 _DURATION_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(?:s|秒)?\s*$")
@@ -112,7 +116,10 @@ _TIMING_INTERVAL_RE = re.compile(
     r"(\d+(?:\.\d+)?)\s*s?\s*[-–—]\s*"
     r"(\d+(?:\.\d+)?)\s*s?"
 )
-_ANCHOR_RE = re.compile(r"\b[ABC]\d+\b")
+# Chinese text is a Unicode word in Python, so ``\b`` does not delimit an
+# anchor beside characters such as ``A3身份``.  ASCII lookarounds catch both
+# prose-adjacent anchor IDs and the ordinary comma-delimited form.
+_ANCHOR_RE = re.compile(r"(?<![A-Za-z0-9_])[ABC]\d+(?![A-Za-z0-9_])")
 _DIALOGUE_ENTRY_RE = re.compile(
     r"(?P<speaker>[A-Z][A-Z0-9_]*)（(?P<delivery>[a-z][a-z0-9_]*)）："
     r"“(?P<text>[^“”]+)”"
@@ -148,6 +155,10 @@ PROVENANCE_FIELDS = (
     "PROVENANCE_DIALOGUE_SHA256",
     "PROVENANCE_ANCHOR_PATH",
     "PROVENANCE_ANCHOR_SHA256",
+)
+KEYFRAME_PROVENANCE_FIELDS = PROVENANCE_FIELDS + (
+    "PROVENANCE_STORYBOARD_PATH",
+    "PROVENANCE_STORYBOARD_SHA256",
 )
 EXPECTED_PROVENANCE_PATHS = {
     "PROVENANCE_SOURCE_PATH": "正文/第01章_输掉Major后，我从民间赛重新开始.md",
@@ -440,7 +451,7 @@ def _parse_storyboard_header(text: str) -> tuple[dict[str, str], list[str]]:
     header: dict[str, str] = {}
     errors: list[str] = []
     for line_number, line in enumerate(text.splitlines(), start=1):
-        if re.match(r"^###\s+分镜\b", line):
+        if re.match(r"^###\s+(?:分镜|关键帧|KEYFRAME)\b", line):
             break
         match = re.match(r"^(PROVENANCE_[A-Z0-9_]+):\s*(.*?)\s*$", line)
         if match is None:
@@ -550,6 +561,106 @@ def _validate_provenance(
     else:
         errors.append("anchor catalog is unavailable; cannot validate ANCHOR_REFS")
     return errors, anchor_ids
+
+
+def _validate_keyframe_provenance(
+    keyframe_text: str,
+    keyframe_path: Path,
+    storyboard_text: str,
+    storyboard_path: Path,
+    *,
+    source_path: Path,
+    dialogue_path: Path,
+) -> list[str]:
+    """Validate all provenance locks declared in the keyframe document.
+
+    Keyframe provenance is resolved from the keyframe file's project root.  The
+    source, dialogue, and storyboard paths must resolve to the CLI arguments;
+    the anchor path must resolve to the storyboard's associated anchor lock.
+    Every declared digest is then recomputed from the resolved file.
+    """
+
+    header, errors = _parse_storyboard_header(keyframe_text)
+    for field in KEYFRAME_PROVENANCE_FIELDS:
+        if not header.get(field, ""):
+            errors.append(f"keyframe header missing {field}")
+
+    storyboard_header, storyboard_header_errors = _parse_storyboard_header(
+        storyboard_text
+    )
+    errors.extend(
+        f"associated storyboard provenance: {error}"
+        for error in storyboard_header_errors
+    )
+
+    expected_paths: dict[str, Path | None] = {
+        "PROVENANCE_SOURCE_PATH": source_path.resolve(),
+        "PROVENANCE_DIALOGUE_PATH": dialogue_path.resolve(),
+        "PROVENANCE_STORYBOARD_PATH": storyboard_path.resolve(),
+    }
+    anchor_relative_path = storyboard_header.get("PROVENANCE_ANCHOR_PATH", "")
+    if anchor_relative_path:
+        associated_anchor_path, anchor_path_error = _safe_project_path(
+            storyboard_path, anchor_relative_path
+        )
+        if anchor_path_error is not None or associated_anchor_path is None:
+            errors.append(
+                "associated storyboard PROVENANCE_ANCHOR_PATH: "
+                f"{anchor_path_error}"
+            )
+        else:
+            expected_paths["PROVENANCE_ANCHOR_PATH"] = associated_anchor_path
+    else:
+        errors.append(
+            "associated storyboard is missing PROVENANCE_ANCHOR_PATH; "
+            "cannot resolve keyframe anchor provenance"
+        )
+
+    resolved: dict[str, Path] = {}
+    for path_field in (
+        "PROVENANCE_SOURCE_PATH",
+        "PROVENANCE_DIALOGUE_PATH",
+        "PROVENANCE_ANCHOR_PATH",
+        "PROVENANCE_STORYBOARD_PATH",
+    ):
+        declared_path = header.get(path_field, "")
+        if not declared_path:
+            continue
+        resolved_path, path_error = _safe_project_path(keyframe_path, declared_path)
+        if path_error is not None or resolved_path is None:
+            errors.append(f"keyframe {path_field}: {path_error}")
+            continue
+        resolved[path_field] = resolved_path
+        expected_path = expected_paths.get(path_field)
+        if expected_path is not None and resolved_path != expected_path:
+            errors.append(
+                f"keyframe {path_field} resolved path must match associated file: "
+                f"expected {expected_path}, got {resolved_path}"
+            )
+        if not resolved_path.is_file():
+            errors.append(f"keyframe {path_field} does not exist: {declared_path}")
+
+    for path_field, hash_field in (
+        ("PROVENANCE_SOURCE_PATH", "PROVENANCE_SOURCE_SHA256"),
+        ("PROVENANCE_DIALOGUE_PATH", "PROVENANCE_DIALOGUE_SHA256"),
+        ("PROVENANCE_ANCHOR_PATH", "PROVENANCE_ANCHOR_SHA256"),
+        ("PROVENANCE_STORYBOARD_PATH", "PROVENANCE_STORYBOARD_SHA256"),
+    ):
+        expected_hash = header.get(hash_field, "")
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_hash):
+            errors.append(
+                f"keyframe {hash_field} must be a 64-character SHA-256 hex digest"
+            )
+        path = resolved.get(path_field)
+        if path is not None and path.is_file():
+            actual_hash = _sha256(path)
+            if expected_hash.lower() != actual_hash:
+                errors.append(
+                    f"keyframe {hash_field} does not match "
+                    f"{header.get(path_field, '')}: expected {actual_hash}, "
+                    f"got {expected_hash}"
+                )
+    return errors
 
 
 def _anchor_ids_near_storyboard(path: Path) -> set[str] | None:
@@ -1287,6 +1398,16 @@ def _prompt_score_literals(value: str) -> list[str]:
     ]
 
 
+def _action_state_fragments(value: str) -> list[str]:
+    """Return meaningful source action clauses for prompt contradiction checks."""
+
+    return [
+        fragment.strip()
+        for fragment in _ACTION_STATE_SPLIT_RE.split(value)
+        if len(fragment.strip()) >= 8
+    ]
+
+
 def _keyframe_text_literals(storyboard_records: list[dict[str, Any]]) -> set[str]:
     literals: set[str] = set()
     for record in storyboard_records:
@@ -1428,6 +1549,16 @@ def validate_keyframes(
                 "CONTINUITY_IN and CONTINUITY_OUT exactly"
             )
 
+        visible_fact_lock = str(record.get("VISIBLE_FACT_LOCK", ""))
+        expected_visible_fact_lock = str(
+            storyboard_record.get("KEYFRAME_MOMENT", "")
+        )
+        if visible_fact_lock != expected_visible_fact_lock:
+            errors.append(
+                f"{location} {shot_id}.VISIBLE_FACT_LOCK must exactly match "
+                "storyboard KEYFRAME_MOMENT"
+            )
+
         reference_entries, reference_errors = _parse_keyframe_reference_images(
             record.get("REFERENCE_IMAGES")
         )
@@ -1525,6 +1656,55 @@ def validate_keyframes(
 
         prompt = str(record.get("KEYFRAME_PROMPT", ""))
         negative = str(record.get("KEYFRAME_NEGATIVE", ""))
+        lock_count = prompt.count(visible_fact_lock) if visible_fact_lock else 0
+        if lock_count != 1:
+            errors.append(
+                f"{location} {shot_id}.KEYFRAME_PROMPT must contain "
+                "VISIBLE_FACT_LOCK exactly once"
+            )
+        prompt_without_fact_lock = prompt
+        if visible_fact_lock and lock_count == 1:
+            prompt_without_fact_lock = prompt.replace(visible_fact_lock, "", 1)
+
+        # KEYFRAME_MOMENT and CONTINUITY_CHECK are independently source-locked
+        # above.  Their anchor tokens are therefore checked against their exact
+        # storyboard values, while free prose in KEYFRAME_PROMPT and FRAME_ROLE
+        # must only use this card's declared ANCHOR_REFS.  Removing the exact
+        # VISIBLE_FACT_LOCK before scanning lets the lock carry its source facts
+        # without permitting an unbound token to be added to prompt prose.
+        anchor_token_checks = (
+            ("KEYFRAME_PROMPT", prompt_without_fact_lock, set(keyframe_refs)),
+            (
+                "KEYFRAME_MOMENT",
+                str(record.get("KEYFRAME_MOMENT", "")),
+                set(_ANCHOR_RE.findall(expected_visible_fact_lock)),
+            ),
+            ("FRAME_ROLE", str(record.get("FRAME_ROLE", "")), set(keyframe_refs)),
+            (
+                "CONTINUITY_CHECK",
+                str(record.get("CONTINUITY_CHECK", "")),
+                set(_ANCHOR_RE.findall(expected_continuity)),
+            ),
+        )
+        for field_name, value, allowed_tokens in anchor_token_checks:
+            undeclared_tokens = sorted(
+                set(_ANCHOR_RE.findall(value)) - allowed_tokens
+            )
+            if undeclared_tokens:
+                errors.append(
+                    f"{location} {shot_id}.{field_name} contains undeclared "
+                    "anchor token(s): " + ", ".join(undeclared_tokens)
+                )
+        for action_field in ("ACTION_START", "ACTION_END"):
+            for action_fragment in _action_state_fragments(
+                str(storyboard_record.get(action_field, ""))
+            ):
+                if action_fragment in prompt_without_fact_lock:
+                    errors.append(
+                        f"{location} {shot_id}.KEYFRAME_PROMPT repeats "
+                        f"{action_field} state outside VISIBLE_FACT_LOCK: "
+                        f"{action_fragment!r}"
+                    )
         if prompt and not prompt.endswith(KEYFRAME_STYLE_SUFFIX):
             errors.append(
                 f"{location} {shot_id}.KEYFRAME_PROMPT must end with the unified "
@@ -1538,7 +1718,7 @@ def validate_keyframes(
                 )
 
         for field_name, value in (
-            ("KEYFRAME_PROMPT", prompt),
+            ("KEYFRAME_PROMPT", prompt_without_fact_lock),
             ("KEYFRAME_NEGATIVE", negative),
         ):
             for literal in sorted(exact_literals, key=len, reverse=True):
@@ -1647,6 +1827,15 @@ def main(argv: list[str] | None = None) -> int:
                 and not keyframe_load_errors
                 and not storyboard_load_errors
             ):
+                keyframe_provenance_errors = _validate_keyframe_provenance(
+                    keyframe_text,
+                    args.keyframes,
+                    storyboard_text,
+                    args.storyboard,
+                    source_path=args.source,
+                    dialogue_path=args.dialogue,
+                )
+                errors.extend(keyframe_provenance_errors)
                 keyframe_errors, keyframe_stats = validate_keyframes(
                     keyframe_text,
                     storyboard_text,
