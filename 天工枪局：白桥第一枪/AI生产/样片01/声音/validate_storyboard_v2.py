@@ -83,7 +83,19 @@ _EVENT_ENTRY_RE = re.compile(
 
 NO_DIALOGUE_VALUE = "无台词／刻意沉默"
 NO_DIALOGUE_PREFIX = f"{NO_DIALOGUE_VALUE}："
-SPEAKING_SILENCE_FUNCTION = "不适用（本镜有台词）"
+SILENCE_FUNCTION_CODES = frozenset(
+    {
+        "TACTICAL_OMISSION",
+        "REACTION_HOLD",
+        "ANOMALY_SILENCE",
+        "ACTION_ONLY",
+        "RESULT_ABSENCE",
+    }
+)
+SPEAKING_SILENCE_FUNCTION = "NOT_APPLICABLE_DIALOGUE_PRESENT"
+SILENCE_FUNCTION_ALLOWLIST = SILENCE_FUNCTION_CODES | {
+    SPEAKING_SILENCE_FUNCTION
+}
 PROVENANCE_FIELDS = (
     "PROVENANCE_SOURCE_PATH",
     "PROVENANCE_SOURCE_SHA256",
@@ -97,6 +109,60 @@ EXPECTED_PROVENANCE_PATHS = {
     "PROVENANCE_DIALOGUE_PATH": "AI生产/样片01/声音/dialogue-lock-v2.json",
     "PROVENANCE_ANCHOR_PATH": "分镜/第01章_样片锚点清单_重制版.md",
 }
+S03_CAMERA_MOVE_CANONICAL = {
+    "S03_SH04A": (
+        "静态贴近三箱边缘，第三声落下后等待暗红木框完成，画面仍停在休息室轴线，"
+        "不提前出现钟声与下坠。"
+    ),
+    "S03_SH04B": (
+        "从暗红木框旁的耳罩慢慢下压，等待钟声尾音完整落下并停留至少0.3s后，"
+        "桌面才开始下沉，镜头随后随周野身体失去支撑向下倾。"
+    ),
+    "S03_SH04C": (
+        "低角度贴着键盘边缘跟拍周野下坠继续，继而让奖牌从键盘边缘滑向画外，"
+        "镜头不追入地面，最后停在黑暗。"
+    ),
+}
+VISIBLE_STORYBOARD_FIELDS = frozenset(
+    {
+        "SCENE",
+        "LAYER",
+        "CAMERA_SIZE",
+        "CAMERA_MOVE",
+        "ACTION_START",
+        "ACTION_END",
+        "COMPOSITION",
+        "LIGHT",
+        "CONTINUITY_IN",
+        "CONTINUITY_OUT",
+        "KEYFRAME_MOMENT",
+        "NEGATIVE",
+    }
+)
+PAPER_TEXT_SEMANTIC_TERMS = frozenset(
+    {
+        "纸",
+        "表",
+        "表格",
+        "报名",
+        "姓名",
+        "名字",
+        "落笔",
+        "写",
+        "登记",
+        "第五格",
+        "空格",
+        "落款",
+        "签名",
+        "字样",
+        "可读",
+        "显示",
+    }
+)
+_PAPER_TEXT_SEMANTIC_RE = re.compile(
+    r"纸|表(?!面|情|演|示|明|达)|表格|报名|姓名|名字|落笔|"
+    r"(?<!特)写|登记|第五格|空格|落款|签名|字样|可读|显示(?!器|屏|幕)"
+)
 SPEECH_RATE_BY_DELIVERY = {
     "off_screen_radio": 4.0,
     "recorded_replay": 4.0,
@@ -121,14 +187,11 @@ TACTICAL_TERMS = (
     "开枪",
     "出声",
 )
-UI_TEXT_PATTERNS = (
-    re.compile(r"\d+\s*[:：]\s*\d+"),
-    re.compile(r"七比五|十六比十九|十六比十八"),
-    re.compile(r"(?:报名表|第五格|空格).{0,20}[“\"]周野[”\"]"),
-    re.compile(r"[“\"]周野[”\"].{0,20}(?:报名表|第五格|空格)"),
-    re.compile(r"(?:纸|表格|报名表|第五格|空格).{0,20}(?:写|填|书写).{0,20}[“\"]?周野"),
-    re.compile(r"[“\"]?周野[”\"]?.{0,20}(?:写|填|书写).{0,20}(?:纸|表格|报名表|第五格|空格)"),
+_SCORE_NUMBER = r"[0-9０-９零〇一二三四五六七八九十百两壹贰叁肆伍陆柒捌玖拾佰]+"
+SCORE_TEXT_PATTERN = re.compile(
+    rf"{_SCORE_NUMBER}\s*(?:比|[-—–:：])\s*{_SCORE_NUMBER}"
 )
+UI_TEXT_PATTERNS = (SCORE_TEXT_PATTERN,)
 
 _SPEECH_CHARACTER_RE = re.compile(
     r"[A-Za-z0-9\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]"
@@ -721,17 +784,8 @@ def validate_storyboard(
                     f"{', '.join(unknown)}"
                 )
 
-        for field, value in record.items():
-            if field.startswith("__") or field.startswith("PROVENANCE_"):
-                continue
-            if field in {
-                "POST_TEXT",
-                "DIALOGUE",
-                "DIALOGUE_TIMING",
-                "TIME_CODE",
-                "EVENT_TIMING",
-            }:
-                continue
+        for field in VISIBLE_STORYBOARD_FIELDS:
+            value = record.get(field)
             if not isinstance(value, str):
                 continue
             for pattern in UI_TEXT_PATTERNS:
@@ -741,6 +795,17 @@ def validate_storyboard(
                         "move it to POST_TEXT"
                     )
                     break
+            if "周野" in value and _PAPER_TEXT_SEMANTIC_RE.search(value):
+                errors.append(
+                    f"{location} {shot_id}.{field} contains paper text for 周野; "
+                    "move exact paper text to POST_TEXT"
+                )
+
+        canonical_camera_move = S03_CAMERA_MOVE_CANONICAL.get(shot_id)
+        if canonical_camera_move is not None and record.get("CAMERA_MOVE") != canonical_camera_move:
+            errors.append(
+                f"{location} {shot_id}.CAMERA_MOVE must equal its canonical S03 event sentence"
+            )
 
         dialogue_entries, dialogue_errors = _parse_dialogue_field(record.get("DIALOGUE"))
         for dialogue_error in dialogue_errors:
@@ -751,13 +816,18 @@ def validate_storyboard(
             errors.append(
                 f"{location} {shot_id}.SILENCE_FUNCTION must be a non-empty string"
             )
+        elif silence_function not in SILENCE_FUNCTION_ALLOWLIST:
+            errors.append(
+                f"{location} {shot_id}.SILENCE_FUNCTION must be an allowed ASCII code: "
+                f"{', '.join(sorted(SILENCE_FUNCTION_ALLOWLIST))}"
+            )
         elif record.get("DIALOGUE") == NO_DIALOGUE_VALUE:
-            if silence_function == SPEAKING_SILENCE_FUNCTION:
+            if silence_function not in SILENCE_FUNCTION_CODES:
                 errors.append(
-                    f"{location} {shot_id}: silent shot SILENCE_FUNCTION must "
-                    "state a non-empty narrative function"
+                    f"{location} {shot_id}: silent shot SILENCE_FUNCTION must be a "
+                    "silent-function code"
                 )
-        elif dialogue_entries and silence_function != SPEAKING_SILENCE_FUNCTION:
+        elif silence_function != SPEAKING_SILENCE_FUNCTION:
             errors.append(
                 f"{location} {shot_id}: speaking shot SILENCE_FUNCTION must equal "
                 f"{SPEAKING_SILENCE_FUNCTION!r}"
