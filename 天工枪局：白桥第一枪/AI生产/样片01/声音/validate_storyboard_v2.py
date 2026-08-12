@@ -47,6 +47,7 @@ STORYBOARD_REQUIRED_FIELDS = (
     "LIGHT",
     "EMOTION",
     "DIALOGUE",
+    "SILENCE_FUNCTION",
     "DIALOGUE_TIMING",
     "SOUND",
     "CONTINUITY_IN",
@@ -80,7 +81,9 @@ _EVENT_ENTRY_RE = re.compile(
     r"(?P<event>[a-z][a-z0-9_]*)=(?P<time>\d+(?:\.\d+)?)s?"
 )
 
-NO_DIALOGUE_PREFIX = "无台词／刻意沉默："
+NO_DIALOGUE_VALUE = "无台词／刻意沉默"
+NO_DIALOGUE_PREFIX = f"{NO_DIALOGUE_VALUE}："
+SPEAKING_SILENCE_FUNCTION = "不适用（本镜有台词）"
 PROVENANCE_FIELDS = (
     "PROVENANCE_SOURCE_PATH",
     "PROVENANCE_SOURCE_SHA256",
@@ -95,8 +98,8 @@ EXPECTED_PROVENANCE_PATHS = {
     "PROVENANCE_ANCHOR_PATH": "分镜/第01章_样片锚点清单_重制版.md",
 }
 SPEECH_RATE_BY_DELIVERY = {
-    "off_screen_radio": 5.0,
-    "recorded_replay": 5.0,
+    "off_screen_radio": 4.0,
+    "recorded_replay": 4.0,
     "off_screen_inner_voice": 4.0,
     "on_screen": 4.0,
 }
@@ -108,15 +111,43 @@ TACTICAL_TERMS = (
     "近点",
     "半秒",
     "收到",
+    "三箱",
+    "补枪",
+    "跳台",
+    "包边",
+    "脚步",
+    "两条线",
+    "准星",
+    "开枪",
+    "出声",
 )
 UI_TEXT_PATTERNS = (
-    re.compile(r"(?<!\d)16:19(?!\d)"),
-    re.compile(r"(?<!\d)7:5(?!\d)"),
-    re.compile(r"十六比十九"),
-    re.compile(r"七比五"),
+    re.compile(r"\d+\s*[:：]\s*\d+"),
+    re.compile(r"七比五|十六比十九|十六比十八"),
     re.compile(r"(?:报名表|第五格|空格).{0,20}[“\"]周野[”\"]"),
     re.compile(r"[“\"]周野[”\"].{0,20}(?:报名表|第五格|空格)"),
+    re.compile(r"(?:纸|表格|报名表|第五格|空格).{0,20}(?:写|填|书写).{0,20}[“\"]?周野"),
+    re.compile(r"[“\"]?周野[”\"]?.{0,20}(?:写|填|书写).{0,20}(?:纸|表格|报名表|第五格|空格)"),
 )
+
+_SPEECH_CHARACTER_RE = re.compile(
+    r"[A-Za-z0-9\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]"
+)
+_PAUSE_WEIGHTS = {
+    "，": 0.2,
+    ",": 0.2,
+    "、": 0.2,
+    "。": 0.35,
+    "！": 0.35,
+    "!": 0.35,
+    "？": 0.35,
+    "?": 0.35,
+    "…": 0.35,
+    "；": 0.3,
+    ";": 0.3,
+    "：": 0.3,
+    ":": 0.3,
+}
 
 
 def _is_finite_number(value: Any) -> bool:
@@ -239,6 +270,9 @@ def _safe_project_path(storyboard_path: Path, relative_path: str) -> tuple[Path 
 def _validate_provenance(
     storyboard_text: str,
     storyboard_path: Path,
+    *,
+    source_path: Path | None = None,
+    dialogue_path: Path | None = None,
 ) -> tuple[list[str], set[str] | None]:
     header, errors = _parse_storyboard_header(storyboard_text)
     for field in PROVENANCE_FIELDS:
@@ -263,6 +297,20 @@ def _validate_provenance(
         resolved[path_field] = path
         if not path.is_file():
             errors.append(f"{path_field} does not exist: {actual_path}")
+
+    for argument_name, path_field, argument_path in (
+        ("--source", "PROVENANCE_SOURCE_PATH", source_path),
+        ("--dialogue", "PROVENANCE_DIALOGUE_PATH", dialogue_path),
+    ):
+        declared_path = resolved.get(path_field)
+        if argument_path is None or declared_path is None:
+            continue
+        resolved_argument = argument_path.resolve()
+        if resolved_argument != declared_path:
+            errors.append(
+                f"{argument_name} resolved path must match {path_field}: "
+                f"expected {declared_path}, got {resolved_argument}"
+            )
 
     for path_field, hash_field in (
         ("PROVENANCE_SOURCE_PATH", "PROVENANCE_SOURCE_SHA256"),
@@ -375,23 +423,12 @@ def _parse_dialogue_field(value: Any) -> tuple[list[dict[str, str]], list[str]]:
     if not isinstance(value, str) or not value.strip():
         return [], ["DIALOGUE must be a non-empty string"]
     value = value.strip()
-    if value.startswith(NO_DIALOGUE_PREFIX):
-        remainder = value[len(NO_DIALOGUE_PREFIX):]
-        if (
-            _DIALOGUE_ENTRY_RE.search(remainder)
-            or "“" in remainder
-            or "”" in remainder
-            or '"' in remainder
-            or "：" in remainder
-            or ":" in remainder
-            or "；" in remainder
-            or ";" in remainder
-        ):
-            return [], [
-                "no-dialogue DIALOGUE may contain only the canonical prefix and a "
-                "silence description; it must not contain a speaking entry"
-            ]
+    if value == NO_DIALOGUE_VALUE:
         return [], []
+    if value.startswith(NO_DIALOGUE_VALUE):
+        return [], [
+            f"no-dialogue DIALOGUE must equal {NO_DIALOGUE_VALUE!r} exactly"
+        ]
     if "无台词" in value:
         return [], [f"no-dialogue DIALOGUE must start with {NO_DIALOGUE_PREFIX!r}"]
     entries, errors = _consume_structured_entries(
@@ -446,15 +483,28 @@ def _parse_event_timing(value: Any) -> tuple[dict[str, float], list[str]]:
 
 
 def _speech_rate(text: str, delivery: str) -> float:
-    if delivery in {"off_screen_radio", "recorded_replay"}:
-        return 5.0
-    if delivery == "on_screen" and any(term in text for term in TACTICAL_TERMS):
+    if any(term in text for term in TACTICAL_TERMS):
         return 5.0
     return SPEECH_RATE_BY_DELIVERY.get(delivery, 4.0)
 
 
+def _speech_character_count(text: str) -> int:
+    """Count only Han characters, ASCII letters, and digits as spoken units."""
+
+    return len(_SPEECH_CHARACTER_RE.findall(text))
+
+
+def _punctuation_pause_budget(text: str) -> float:
+    """Add conservative pauses without treating punctuation as spoken units."""
+
+    return sum(_PAUSE_WEIGHTS.get(character, 0.0) for character in text)
+
+
 def _minimum_speech_duration(text: str, delivery: str) -> float:
-    return len(text) / _speech_rate(text, delivery)
+    return (
+        _speech_character_count(text) / _speech_rate(text, delivery)
+        + _punctuation_pause_budget(text)
+    )
 
 
 def _locked_lines(payload: Any) -> tuple[list[Any] | None, list[str]]:
@@ -672,7 +722,15 @@ def validate_storyboard(
                 )
 
         for field, value in record.items():
-            if field.startswith("__") or field in {"POST_TEXT", "DIALOGUE"}:
+            if field.startswith("__") or field.startswith("PROVENANCE_"):
+                continue
+            if field in {
+                "POST_TEXT",
+                "DIALOGUE",
+                "DIALOGUE_TIMING",
+                "TIME_CODE",
+                "EVENT_TIMING",
+            }:
                 continue
             if not isinstance(value, str):
                 continue
@@ -687,6 +745,23 @@ def validate_storyboard(
         dialogue_entries, dialogue_errors = _parse_dialogue_field(record.get("DIALOGUE"))
         for dialogue_error in dialogue_errors:
             errors.append(f"{location} {shot_id}: {dialogue_error}")
+
+        silence_function = record.get("SILENCE_FUNCTION")
+        if not isinstance(silence_function, str) or not silence_function.strip():
+            errors.append(
+                f"{location} {shot_id}.SILENCE_FUNCTION must be a non-empty string"
+            )
+        elif record.get("DIALOGUE") == NO_DIALOGUE_VALUE:
+            if silence_function == SPEAKING_SILENCE_FUNCTION:
+                errors.append(
+                    f"{location} {shot_id}: silent shot SILENCE_FUNCTION must "
+                    "state a non-empty narrative function"
+                )
+        elif dialogue_entries and silence_function != SPEAKING_SILENCE_FUNCTION:
+            errors.append(
+                f"{location} {shot_id}: speaking shot SILENCE_FUNCTION must equal "
+                f"{SPEAKING_SILENCE_FUNCTION!r}"
+            )
 
         timing_entries, timing_errors = _parse_timing_field(
             record.get("DIALOGUE_TIMING")
@@ -811,6 +886,7 @@ def validate_storyboard(
             event_by_shot[shot_id] = events
 
     expected_dialogue: Counter[tuple[str, str, str, str]] = Counter()
+    expected_dialogue_sequence: list[tuple[str, str, str, str]] = []
     for index, locked in enumerate(locked_records, start=1):
         if not isinstance(locked, dict):
             continue
@@ -820,14 +896,14 @@ def validate_storyboard(
                 f"locked_lines[{index}].shot_id must match S##_SH## with an optional A/B/C suffix"
             )
             continue
-        expected_dialogue[
-            (
-                base_id,
-                str(locked.get("speaker_id", "")),
-                str(locked.get("delivery", "")),
-                str(locked.get("text", "")),
-            )
-        ] += 1
+        dialogue_item = (
+            base_id,
+            str(locked.get("speaker_id", "")),
+            str(locked.get("delivery", "")),
+            str(locked.get("text", "")),
+        )
+        expected_dialogue[dialogue_item] += 1
+        expected_dialogue_sequence.append(dialogue_item)
 
     actual_counter = Counter(actual_dialogue)
     missing_dialogue = expected_dialogue - actual_counter
@@ -836,6 +912,23 @@ def validate_storyboard(
         errors.append(f"dialogue closed set missing {count} occurrence(s): {item!r}")
     for item, count in extra_dialogue.items():
         errors.append(f"dialogue closed set has {count} unexpected occurrence(s): {item!r}")
+
+    if actual_dialogue != expected_dialogue_sequence:
+        mismatch_index = 0
+        for mismatch_index, (actual, expected) in enumerate(
+            zip(actual_dialogue, expected_dialogue_sequence), start=1
+        ):
+            if actual != expected:
+                errors.append(
+                    f"dialogue sequence mismatch at position {mismatch_index}: "
+                    f"expected {expected!r}, got {actual!r}"
+                )
+                break
+        else:
+            errors.append(
+                "dialogue sequence length mismatch: "
+                f"expected {len(expected_dialogue_sequence)}, got {len(actual_dialogue)}"
+            )
 
     def global_event(shot_id: str, event_name: str) -> float | None:
         events = event_by_shot.get(shot_id)
@@ -861,20 +954,39 @@ def validate_storyboard(
 
     wood_frame = global_event("S03_SH04A", "wood_frame_complete")
     bell_start = global_event("S03_SH04B", "bell_start")
-    bell_tail_end = event_by_shot.get("S03_SH04B", {}).get("bell_tail_end")
-    fall_start = event_by_shot.get("S03_SH04B", {}).get("fall_start")
-    if wood_frame is not None and bell_start is not None and wood_frame > bell_start + 0.001:
-        errors.append("S03 wood frame must complete before the bell starts")
-    if bell_tail_end is not None and fall_start is not None:
-        if fall_start < bell_tail_end + 0.1:
-            errors.append(
-                "S03_SH04B requires a complete bell tail and at least 0.1s pause "
-                "before fall_start"
-            )
-    fall_global = global_event("S03_SH04B", "fall_start")
+    bell_tail_end = global_event("S03_SH04B", "bell_tail_end")
+    fall_start = global_event("S03_SH04B", "fall_start")
+    fall_continues = global_event("S03_SH04C", "fall_continues")
     medal_global = global_event("S03_SH04C", "medal_slide_start")
-    if fall_global is not None and medal_global is not None and medal_global <= fall_global:
-        errors.append("S03 medal slide must occur after the fall has started")
+    if (
+        wood_frame is not None
+        and bell_start is not None
+        and wood_frame > bell_start
+    ):
+        errors.append("S03 event order requires wood_frame_complete <= bell_start")
+    if (
+        bell_start is not None
+        and bell_tail_end is not None
+        and bell_start > bell_tail_end
+    ):
+        errors.append("S03 event order requires bell_start <= bell_tail_end")
+    if bell_tail_end is not None and fall_start is not None:
+        if fall_start - bell_tail_end < 0.3:
+            errors.append(
+                "S03_SH04B requires at least 0.3s after bell_tail_end before fall_start"
+            )
+    if (
+        fall_start is not None
+        and fall_continues is not None
+        and fall_start > fall_continues
+    ):
+        errors.append("S03 event order requires fall_start <= fall_continues")
+    if (
+        fall_continues is not None
+        and medal_global is not None
+        and fall_continues > medal_global
+    ):
+        errors.append("S03 event order requires fall_continues <= medal_slide_start")
 
     s06_events = event_by_shot.get("S06_SH01B")
     s06_timing = timing_by_shot.get("S06_SH01B", [])
@@ -938,7 +1050,10 @@ def main(argv: list[str] | None = None) -> int:
         anchor_ids: set[str] | None = None
         if storyboard_text is not None and not storyboard_load_errors:
             provenance_errors, anchor_ids = _validate_provenance(
-                storyboard_text, args.storyboard
+                storyboard_text,
+                args.storyboard,
+                source_path=args.source,
+                dialogue_path=args.dialogue,
             )
             errors.extend(provenance_errors)
         if (
