@@ -38,8 +38,6 @@ MIRRORED_FIELDS = (
 
 PRODUCTION_HEADERS = (
     ("SOURCE_STORYBOARD", "分镜/第01章_样片逐镜头分镜_重制版.md"),
-    ("BOARD_LAYOUT", "PORTRAIT_2X3"),
-    ("SHOT_FRAME_RATIO", "9:16"),
     ("VISUAL_STYLE", "电影级 3D 国漫写实"),
     ("IMAGE_PRODUCTION", "STOPPED_PENDING_REVIEW"),
 )
@@ -330,6 +328,16 @@ def validate_review(
     ) = _parse_storyboard_internal(storyboard_text)
     errors.extend(source_parse_errors)
     header, cells = _parse_review_internal(review_text)
+
+    for field, required_value in (
+        ("BOARD_LAYOUT", "PORTRAIT_2X3"),
+        ("SHOT_FRAME_RATIO", "9:16"),
+    ):
+        actual_value = header.get(field)
+        if actual_value != required_value:
+            errors.append(
+                f"{field} must be {required_value!r}, got {actual_value!r}"
+            )
 
     if check_sha:
         expected_sha = hashlib.sha256(storyboard_text.encode("utf-8")).hexdigest()

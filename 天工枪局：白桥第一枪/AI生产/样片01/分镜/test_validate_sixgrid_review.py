@@ -361,27 +361,35 @@ IMAGE_STATUS: NOT_GENERATED
                     )
                     self.assertTrue(any(field in item for item in errors))
 
-    def test_custom_mapping_does_not_require_production_headers(self):
-        review = self.review.replace("BOARD_LAYOUT: PORTRAIT_2X3\n", "").replace(
-            "SHOT_FRAME_RATIO: 9:16\n", ""
-        )
-        errors = validate_review(
-            self.storyboard,
-            review,
-            expected_boards={"SB-T01": ("S01_SH01", "S01_SH02")},
-            check_sha=False,
-        )
-        self.assertEqual([], errors)
+    def test_custom_mapping_requires_base_format_headers(self):
+        for field, required_value in (
+            ("BOARD_LAYOUT", "PORTRAIT_2X3"),
+            ("SHOT_FRAME_RATIO", "9:16"),
+        ):
+            original = f"{field}: {required_value}\n"
+            for mutation, replacement, actual_value in (
+                ("missing", "", None),
+                ("corrupt", f"{field}: CORRUPTED\n", "CORRUPTED"),
+            ):
+                with self.subTest(field=field, mutation=mutation):
+                    errors = validate_review(
+                        self.storyboard,
+                        self.review.replace(original, replacement, 1),
+                        expected_boards={"SB-T01": ("S01_SH01", "S01_SH02")},
+                        check_sha=False,
+                    )
+                    self.assertIn(
+                        f"{field} must be {required_value!r}, got {actual_value!r}",
+                        errors,
+                    )
 
     def test_custom_mapping_still_checks_sha_when_enabled(self):
-        review = self.review.replace("BOARD_LAYOUT: PORTRAIT_2X3\n", "").replace(
-            "SHOT_FRAME_RATIO: 9:16\n", ""
-        )
         errors = validate_review(
             self.storyboard,
-            review,
+            self.review,
             expected_boards={"SB-T01": ("S01_SH01", "S01_SH02")},
         )
+        self.assertEqual(1, len(errors))
         self.assertTrue(
             any("SOURCE_STORYBOARD_SHA256 must match" in item for item in errors)
         )
