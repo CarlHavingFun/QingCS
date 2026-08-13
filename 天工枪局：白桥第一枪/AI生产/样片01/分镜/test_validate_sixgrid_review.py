@@ -5,7 +5,7 @@ import sys
 import tempfile
 import unittest
 
-from validate_sixgrid_review import parse_storyboard, validate_review
+from validate_sixgrid_review import parse_review, parse_storyboard, validate_review
 
 
 PRODUCTION_BOARDS = {
@@ -225,6 +225,53 @@ IMAGE_STATUS: NOT_GENERATED
         )
         self.assertEqual([], errors)
 
+    def test_parse_review_public_contract(self):
+        _, review = build_production_documents()
+        header, cells = parse_review(review)
+        self.assertEqual(
+            {
+                "SOURCE_STORYBOARD": "分镜/第01章_样片逐镜头分镜_重制版.md",
+                "SOURCE_STORYBOARD_SHA256": "ignored-in-unit-test",
+                "BOARD_LAYOUT": "PORTRAIT_2X3",
+                "SHOT_FRAME_RATIO": "9:16",
+                "VISUAL_STYLE": "电影级 3D 国漫写实",
+                "IMAGE_PRODUCTION": "STOPPED_PENDING_REVIEW",
+            },
+            header,
+        )
+        self.assertEqual(24, len(cells))
+        self.assertEqual(
+            (
+                "SB-01-C01", "SB-01-C02", "SB-01-C03",
+                "SB-01-C04", "SB-01-C05", "SB-01-C06",
+                "SB-02-C01", "SB-02-C02", "SB-02-C03",
+                "SB-02-C04", "SB-02-C05", "SB-02-C06",
+                "SB-03-C01", "SB-03-C02", "SB-03-C03",
+                "SB-03-C04", "SB-03-C05", "SB-03-C06",
+                "SB-04-C01", "SB-04-C02", "SB-04-C03",
+                "SB-04-C04", "SB-04-C05", "SB-04-C06",
+            ),
+            tuple(cell["CELL_ID"] for cell in cells),
+        )
+        self.assertEqual("SB-01-C01", cells[0]["CELL_ID"])
+        self.assertEqual("SB-04-C06", cells[-1]["CELL_ID"])
+        self.assertEqual(
+            (
+                "SB-01", "SB-01", "SB-01", "SB-01", "SB-01", "SB-01",
+                "SB-02", "SB-02", "SB-02", "SB-02", "SB-02", "SB-02",
+                "SB-03", "SB-03", "SB-03", "SB-03", "SB-03", "SB-03",
+                "SB-04", "SB-04", "SB-04", "SB-04", "SB-04", "SB-04",
+            ),
+            tuple(cell["BOARD_ID"] for cell in cells),
+        )
+        private_fields = {
+            field
+            for cell in cells
+            for field in cell
+            if field.startswith("__")
+        }
+        self.assertEqual(set(), private_fields)
+
     def test_storyboard_shot_id_starts_a_block_without_a_heading(self):
         shots = parse_storyboard(
             "SHOT_ID: S01_SH01\nSCENE: first\n"
@@ -394,6 +441,88 @@ IMAGE_STATUS: NOT_GENERATED
             any("SOURCE_STORYBOARD_SHA256 must match" in item for item in errors)
         )
 
+    def test_production_schema_rejects_unknown_fields_in_every_scope(self):
+        storyboard, review = build_production_documents()
+        cases = (
+            (
+                "header",
+                review.replace(
+                    "IMAGE_PRODUCTION: STOPPED_PENDING_REVIEW\n",
+                    "IMAGE_PRODUCTION: STOPPED_PENDING_REVIEW\n"
+                    "VIDEO_STATUS: GENERATED\n",
+                    1,
+                ),
+            ),
+            (
+                "board",
+                review.replace(
+                    "BOARD_ID: SB-01\n",
+                    "BOARD_ID: SB-01\nVIDEO_STATUS: GENERATED\n",
+                    1,
+                ),
+            ),
+            (
+                "QA_ONLY",
+                review.replace(
+                    "CELL_TYPE: QA_ONLY\n",
+                    "CELL_TYPE: QA_ONLY\nVIDEO_STATUS: GENERATED\n",
+                    1,
+                ),
+            ),
+        )
+        for scope, altered in cases:
+            with self.subTest(scope=scope):
+                errors = validate_review(storyboard, altered, check_sha=False)
+                self.assertTrue(
+                    any(
+                        scope in item
+                        and "VIDEO_STATUS" in item
+                        and "not allowed" in item
+                        for item in errors
+                    ),
+                    errors,
+                )
+
+    def test_custom_mapping_does_not_acquire_production_field_schema(self):
+        review = self.review.replace(
+            "SHOT_FRAME_RATIO: 9:16\n",
+            "SHOT_FRAME_RATIO: 9:16\nCUSTOM_HEADER: retained\n",
+            1,
+        ).replace(
+            "BOARD_ID: SB-T01\n",
+            "BOARD_ID: SB-T01\nCUSTOM_BOARD_FIELD: retained\n",
+            1,
+        ).replace(
+            "CELL_TYPE: SHOT\n",
+            "CELL_TYPE: SHOT\nGENERATE_IMAGE: YES\nVIDEO_STATUS: GENERATED\n",
+            1,
+        )
+        errors = validate_review(
+            self.storyboard,
+            review,
+            expected_boards={"SB-T01": ("S01_SH01", "S01_SH02")},
+            check_sha=False,
+        )
+        self.assertEqual([], errors)
+
+    def test_equivalent_expected_boards_mapping_gets_production_checks(self):
+        storyboard, review = build_production_documents()
+        review = review.replace(
+            "IMAGE_PRODUCTION: STOPPED_PENDING_REVIEW\n",
+            "",
+            1,
+        )
+        errors = validate_review(
+            storyboard,
+            review,
+            expected_boards=dict(PRODUCTION_BOARDS),
+            check_sha=False,
+        )
+        self.assertIn(
+            "IMAGE_PRODUCTION must be 'STOPPED_PENDING_REVIEW', got None",
+            errors,
+        )
+
     def test_rejects_generated_shot_image_status(self):
         altered = self.review.replace(
             "IMAGE_STATUS: NOT_GENERATED", "IMAGE_STATUS: GENERATED", 1
@@ -415,6 +544,15 @@ IMAGE_STATUS: NOT_GENERATED
             check_sha=False,
         )
         self.assertTrue(any("CELL_ID must be 'SB-T01-C01'" in item for item in errors))
+
+    def test_rejects_a_cell_heading_number_that_does_not_match_position(self):
+        storyboard, review = build_production_documents()
+        review = review.replace("### 格 01", "### 格 99", 1)
+        errors = validate_review(storyboard, review, check_sha=False)
+        self.assertIn(
+            "SB-01 cell heading number must be '01', got '99'",
+            errors,
+        )
 
     def test_production_layout_requires_the_qa_only_cell(self):
         storyboard, review = build_production_documents(include_qa=False)
@@ -625,6 +763,27 @@ IMAGE_STATUS: NOT_GENERATED
             any("duplicate source SHOT_ID S01_SH01" in item for item in errors)
         )
 
+    def test_production_rejects_a_duplicate_source_dialogue_field(self):
+        storyboard, review = build_production_documents()
+        dialogue = "DIALOGUE: dialogue S01_SH01\n"
+        storyboard = storyboard.replace(dialogue, dialogue + dialogue, 1)
+        digest = hashlib.sha256(storyboard.encode("utf-8")).hexdigest()
+        review = review.replace("ignored-in-unit-test", digest, 1)
+        errors = validate_review(storyboard, review)
+        self.assertTrue(
+            any(
+                "source line" in item
+                and "shot block 1" in item
+                and "repeats DIALOGUE" in item
+                for item in errors
+            ),
+            errors,
+        )
+        self.assertFalse(
+            any("SOURCE_STORYBOARD_SHA256 must match" in item for item in errors),
+            errors,
+        )
+
     def test_production_layout_rejects_a_source_block_without_shot_id(self):
         storyboard, review = build_production_documents()
         altered = storyboard + "### 分镜 orphan\nSCENE: no identifier\n"
@@ -654,6 +813,25 @@ IMAGE_STATUS: NOT_GENERATED
         result = self.run_cli(storyboard, review)
         self.assertEqual(1, result.returncode)
         self.assertIn("ERROR: BOARD_LAYOUT", result.stderr)
+
+    def test_cli_rejects_additional_fields_on_production_shot_cards(self):
+        storyboard, review = build_production_documents()
+        digest = hashlib.sha256(storyboard.encode("utf-8")).hexdigest()
+        review = review.replace("ignored-in-unit-test", digest, 1)
+        for field, field_line in (
+            ("GENERATE_IMAGE", "GENERATE_IMAGE: YES"),
+            ("VIDEO_STATUS", "VIDEO_STATUS: GENERATED"),
+        ):
+            with self.subTest(field=field):
+                altered = review.replace(
+                    "CELL_TYPE: SHOT\n",
+                    f"CELL_TYPE: SHOT\n{field_line}\n",
+                    1,
+                )
+                result = self.run_cli(storyboard, altered)
+                self.assertEqual(1, result.returncode, result.stdout)
+                self.assertIn(field, result.stderr)
+                self.assertIn("not allowed", result.stderr)
 
     def run_cli(self, storyboard, review):
         script = Path(__file__).with_name("validate_sixgrid_review.py")

@@ -61,12 +61,35 @@ PRODUCTION_QA_LOCKS = (
     ),
 )
 
+_PRODUCTION_HEADER_FIELDS = frozenset(
+    {
+        "SOURCE_STORYBOARD_SHA256",
+        "BOARD_LAYOUT",
+        "SHOT_FRAME_RATIO",
+        *(field for field, _ in PRODUCTION_HEADERS),
+    }
+)
+_PRODUCTION_BOARD_FIELDS = frozenset({"BOARD_ID"})
+_PRODUCTION_SHOT_FIELDS = frozenset(
+    {"CELL_ID", "CELL_TYPE", "SHOT_ID", "IMAGE_STATUS", *MIRRORED_FIELDS}
+)
+_PRODUCTION_QA_FIELDS = frozenset(
+    {
+        "CELL_ID",
+        "CELL_TYPE",
+        "GENERATE_IMAGE",
+        "IMAGE_STATUS",
+        *(field for field, _ in PRODUCTION_QA_LOCKS),
+    }
+)
+
 _FIELD_RE = re.compile(r"^([A-Z][A-Z0-9_]*):\s*(.*?)\s*$")
 _STORYBOARD_HEADING_RE = re.compile(r"^###\s+分镜(?:\s|$)")
 _BOARD_HEADING_RE = re.compile(r"^##\s+(SB-[A-Za-z0-9-]+)\s*$", re.MULTILINE)
-_CELL_HEADING_RE = re.compile(r"^###\s+格(?:\s|$)")
+_CELL_HEADING_RE = re.compile(r"^###\s+格(?:\s+(\d+))?\s*$")
 _SECTION_BOARD_ID = "__SECTION_BOARD_ID"
 _SECTION_CELL_POSITION = "__SECTION_CELL_POSITION"
+_SECTION_CELL_HEADING_NUMBER = "__SECTION_CELL_HEADING_NUMBER"
 
 
 def _parse_storyboard_internal(
@@ -77,12 +100,13 @@ def _parse_storyboard_internal(
     blocks: list[dict[str, str]] = []
     current: dict[str, str] | None = None
     declaration_count = 0
+    errors: list[str] = []
 
     def store_current() -> None:
         if current is not None:
             blocks.append(dict(current))
 
-    for line in text.splitlines():
+    for line_number, line in enumerate(text.splitlines(), start=1):
         if _STORYBOARD_HEADING_RE.match(line):
             store_current()
             current = {}
@@ -100,11 +124,15 @@ def _parse_storyboard_internal(
             elif current is None:
                 current = {}
         if current is not None:
+            if field != "SHOT_ID" and field in current:
+                errors.append(
+                    f"source line {line_number} shot block {len(blocks) + 1} "
+                    f"repeats {field}"
+                )
             current[field] = value
 
     store_current()
     shots: dict[str, dict[str, str]] = {}
-    errors: list[str] = []
     for block_number, block in enumerate(blocks, start=1):
         shot_id = block.get("SHOT_ID", "")
         if not shot_id:
@@ -147,7 +175,8 @@ def _parse_review_internal(
             board_cell_position = 0
             continue
 
-        if _CELL_HEADING_RE.match(line):
+        cell_match = _CELL_HEADING_RE.match(line)
+        if cell_match is not None:
             if current is not None:
                 cells.append(current)
             if board_id:
@@ -155,6 +184,7 @@ def _parse_review_internal(
             current = {
                 _SECTION_BOARD_ID: board_id,
                 _SECTION_CELL_POSITION: str(board_cell_position),
+                _SECTION_CELL_HEADING_NUMBER: cell_match.group(1) or "",
             }
             continue
 
@@ -182,7 +212,7 @@ def parse_review(text: str) -> tuple[dict[str, str], list[dict[str, str]]]:
         cell = {
             field: value
             for field, value in internal_cell.items()
-            if field not in {_SECTION_BOARD_ID, _SECTION_CELL_POSITION}
+            if not field.startswith("__")
         }
         cell["BOARD_ID"] = internal_cell[_SECTION_BOARD_ID]
         cells.append(cell)
@@ -310,6 +340,75 @@ def _production_index_errors(text: str) -> list[str]:
     return errors
 
 
+def _production_schema_errors(text: str) -> list[str]:
+    """Reject fields outside the exact production schema in every scope."""
+
+    errors: list[str] = []
+    scope = "header"
+    board_id = ""
+    cell_fields: list[tuple[int, str, str]] | None = None
+
+    def validate_cell() -> None:
+        if cell_fields is None:
+            return
+        values = {field: value for _, field, value in cell_fields}
+        cell_type = values.get("CELL_TYPE", "")
+        cell_id = values.get("CELL_ID", "<unknown cell>")
+        if cell_type == "SHOT":
+            allowed_fields = _PRODUCTION_SHOT_FIELDS
+            scope_name = "SHOT"
+        elif cell_type == "QA_ONLY":
+            allowed_fields = _PRODUCTION_QA_FIELDS
+            scope_name = "QA_ONLY"
+        else:
+            allowed_fields = _PRODUCTION_SHOT_FIELDS | _PRODUCTION_QA_FIELDS
+            scope_name = "cell"
+        for line_number, field, _ in cell_fields:
+            if field not in allowed_fields:
+                errors.append(
+                    f"production {scope_name} cell {cell_id} field {field} "
+                    f"is not allowed at review line {line_number}"
+                )
+
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        board_match = _BOARD_HEADING_RE.match(line)
+        if board_match is not None:
+            validate_cell()
+            cell_fields = None
+            scope = "board"
+            board_id = board_match.group(1)
+            continue
+
+        if _CELL_HEADING_RE.match(line):
+            validate_cell()
+            cell_fields = []
+            scope = "cell"
+            continue
+
+        field_match = _FIELD_RE.match(line)
+        if field_match is None:
+            continue
+        field, value = field_match.groups()
+        if scope == "header":
+            if field not in _PRODUCTION_HEADER_FIELDS:
+                errors.append(
+                    f"production header field {field} is not allowed "
+                    f"at review line {line_number}"
+                )
+        elif scope == "board":
+            if field not in _PRODUCTION_BOARD_FIELDS:
+                errors.append(
+                    f"production board {board_id} field {field} is not allowed "
+                    f"at review line {line_number}"
+                )
+        else:
+            assert cell_fields is not None
+            cell_fields.append((line_number, field, value))
+
+    validate_cell()
+    return errors
+
+
 def validate_review(
     storyboard_text: str,
     review_text: str,
@@ -328,6 +427,8 @@ def validate_review(
     ) = _parse_storyboard_internal(storyboard_text)
     errors.extend(source_parse_errors)
     header, cells = _parse_review_internal(review_text)
+    is_production = expected_boards == EXPECTED_BOARDS
+    boards_to_validate = EXPECTED_BOARDS if is_production else expected_boards
 
     for field, required_value in (
         ("BOARD_LAYOUT", "PORTRAIT_2X3"),
@@ -353,7 +454,7 @@ def validate_review(
         for line in review_text.splitlines()
         if (match := _BOARD_HEADING_RE.match(line)) is not None
     )
-    required_board_order = tuple(expected_boards)
+    required_board_order = tuple(boards_to_validate)
     if board_order != required_board_order:
         errors.append(
             f"board order must be {required_board_order!r}, got {board_order!r}"
@@ -366,6 +467,14 @@ def validate_review(
             errors.append(
                 f"{cell.get('CELL_ID', '<unknown cell>')} appears outside a board section"
             )
+        else:
+            required_heading_number = f"{int(cell[_SECTION_CELL_POSITION]):02d}"
+            actual_heading_number = cell[_SECTION_CELL_HEADING_NUMBER]
+            if actual_heading_number != required_heading_number:
+                errors.append(
+                    f"{physical_board_id} cell heading number must be "
+                    f"{required_heading_number!r}, got {actual_heading_number!r}"
+                )
         if "BOARD_ID" in cell:
             errors.append(
                 f"{cell.get('CELL_ID', '<unknown cell>')} cell BOARD_ID cannot change "
@@ -373,7 +482,8 @@ def validate_review(
             )
         cells_by_board.setdefault(physical_board_id, []).append(cell)
 
-    if expected_boards is EXPECTED_BOARDS:
+    if is_production:
+        errors.extend(_production_schema_errors(review_text))
         for field, required_value in PRODUCTION_HEADERS:
             actual_value = header.get(field)
             if actual_value != required_value:
@@ -437,7 +547,7 @@ def validate_review(
                         f"got {actual_value!r}"
                     )
 
-    for board_id, expected_shots in expected_boards.items():
+    for board_id, expected_shots in boards_to_validate.items():
         board_cells = cells_by_board.get(board_id, [])
         for position, cell in enumerate(board_cells, start=1):
             required_cell_id = f"{board_id}-C{position:02d}"
