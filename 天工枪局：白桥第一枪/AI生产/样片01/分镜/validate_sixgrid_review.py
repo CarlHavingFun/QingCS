@@ -40,17 +40,22 @@ _FIELD_RE = re.compile(r"^([A-Z][A-Z0-9_]*):\s*(.*?)\s*$")
 _STORYBOARD_HEADING_RE = re.compile(r"^###\s+分镜(?:\s|$)")
 _BOARD_HEADING_RE = re.compile(r"^##\s+(SB-[A-Za-z0-9-]+)\s*$")
 _CELL_HEADING_RE = re.compile(r"^###\s+格(?:\s|$)")
+_SECTION_BOARD_ID = "__SECTION_BOARD_ID"
+_SECTION_CELL_POSITION = "__SECTION_CELL_POSITION"
 
 
-def parse_storyboard(text: str) -> dict[str, dict[str, str]]:
-    """Parse storyboard shot blocks keyed by ``SHOT_ID``."""
+def _parse_storyboard_internal(
+    text: str,
+) -> tuple[dict[str, dict[str, str]], list[str], int, int]:
+    """Parse shots while retaining source block and ID declaration counts."""
 
-    shots: dict[str, dict[str, str]] = {}
+    blocks: list[dict[str, str]] = []
     current: dict[str, str] | None = None
+    declaration_count = 0
 
     def store_current() -> None:
-        if current is not None and current.get("SHOT_ID"):
-            shots[current["SHOT_ID"]] = dict(current)
+        if current is not None:
+            blocks.append(dict(current))
 
     for line in text.splitlines():
         if _STORYBOARD_HEADING_RE.match(line):
@@ -63,6 +68,7 @@ def parse_storyboard(text: str) -> dict[str, dict[str, str]]:
             continue
         field, value = match.groups()
         if field == "SHOT_ID":
+            declaration_count += 1
             if current is not None and current.get("SHOT_ID"):
                 store_current()
                 current = {}
@@ -72,15 +78,38 @@ def parse_storyboard(text: str) -> dict[str, dict[str, str]]:
             current[field] = value
 
     store_current()
+    shots: dict[str, dict[str, str]] = {}
+    errors: list[str] = []
+    for block_number, block in enumerate(blocks, start=1):
+        shot_id = block.get("SHOT_ID", "")
+        if not shot_id:
+            errors.append(f"source shot block {block_number} missing SHOT_ID")
+            continue
+        if shot_id in shots:
+            errors.append(
+                f"duplicate source SHOT_ID {shot_id} at shot block {block_number}"
+            )
+        shots[shot_id] = block
+
+    return shots, errors, len(blocks), declaration_count
+
+
+def parse_storyboard(text: str) -> dict[str, dict[str, str]]:
+    """Parse storyboard shot blocks keyed by ``SHOT_ID``."""
+
+    shots, _, _, _ = _parse_storyboard_internal(text)
     return shots
 
 
-def parse_review(text: str) -> tuple[dict[str, str], list[dict[str, str]]]:
-    """Parse review headers and cells, preserving each cell's board ID."""
+def _parse_review_internal(
+    text: str,
+) -> tuple[dict[str, str], list[dict[str, str]]]:
+    """Parse review data with non-overridable physical section metadata."""
 
     header: dict[str, str] = {}
     cells: list[dict[str, str]] = []
     board_id = ""
+    board_cell_position = 0
     current: dict[str, str] | None = None
 
     for line in text.splitlines():
@@ -90,12 +119,18 @@ def parse_review(text: str) -> tuple[dict[str, str], list[dict[str, str]]]:
                 cells.append(current)
                 current = None
             board_id = board_match.group(1)
+            board_cell_position = 0
             continue
 
         if _CELL_HEADING_RE.match(line):
             if current is not None:
                 cells.append(current)
-            current = {"BOARD_ID": board_id}
+            if board_id:
+                board_cell_position += 1
+            current = {
+                _SECTION_BOARD_ID: board_id,
+                _SECTION_CELL_POSITION: str(board_cell_position),
+            }
             continue
 
         field_match = _FIELD_RE.match(line)
@@ -110,6 +145,22 @@ def parse_review(text: str) -> tuple[dict[str, str], list[dict[str, str]]]:
 
     if current is not None:
         cells.append(current)
+    return header, cells
+
+
+def parse_review(text: str) -> tuple[dict[str, str], list[dict[str, str]]]:
+    """Parse review headers and cells, exposing physical board membership."""
+
+    header, internal_cells = _parse_review_internal(text)
+    cells: list[dict[str, str]] = []
+    for internal_cell in internal_cells:
+        cell = {
+            field: value
+            for field, value in internal_cell.items()
+            if field not in {_SECTION_BOARD_ID, _SECTION_CELL_POSITION}
+        }
+        cell["BOARD_ID"] = internal_cell[_SECTION_BOARD_ID]
+        cells.append(cell)
     return header, cells
 
 
@@ -139,6 +190,42 @@ def _duplicate_review_field_errors(text: str) -> list[str]:
     return errors
 
 
+def _board_declaration_errors(text: str) -> list[str]:
+    """Require each board heading to have one matching board-level ID."""
+
+    sections: list[tuple[str, str | None]] = []
+    current_section_index: int | None = None
+    inside_cell = False
+    for line in text.splitlines():
+        board_match = _BOARD_HEADING_RE.match(line)
+        if board_match is not None:
+            sections.append((board_match.group(1), None))
+            current_section_index = len(sections) - 1
+            inside_cell = False
+            continue
+        if _CELL_HEADING_RE.match(line):
+            inside_cell = True
+            continue
+        field_match = _FIELD_RE.match(line)
+        if (
+            field_match is not None
+            and current_section_index is not None
+            and not inside_cell
+            and field_match.group(1) == "BOARD_ID"
+        ):
+            section_id, _ = sections[current_section_index]
+            sections[current_section_index] = (section_id, field_match.group(2))
+
+    errors: list[str] = []
+    for section_id, declared_id in sections:
+        if declared_id != section_id:
+            errors.append(
+                f"{section_id} board-level BOARD_ID must be {section_id!r}, "
+                f"got {declared_id!r}"
+            )
+    return errors
+
+
 def validate_review(
     storyboard_text: str,
     review_text: str,
@@ -148,8 +235,15 @@ def validate_review(
     """Return every violation found in a six-grid review document."""
 
     errors = _duplicate_review_field_errors(review_text)
-    source_shots = parse_storyboard(storyboard_text)
-    header, cells = parse_review(review_text)
+    errors.extend(_board_declaration_errors(review_text))
+    (
+        source_shots,
+        source_parse_errors,
+        source_block_count,
+        source_declaration_count,
+    ) = _parse_storyboard_internal(storyboard_text)
+    errors.extend(source_parse_errors)
+    header, cells = _parse_review_internal(review_text)
 
     for field, required_value in (
         ("BOARD_LAYOUT", "PORTRAIT_2X3"),
@@ -183,13 +277,28 @@ def validate_review(
 
     cells_by_board: dict[str, list[dict[str, str]]] = {}
     for cell in cells:
-        cells_by_board.setdefault(cell.get("BOARD_ID", ""), []).append(cell)
+        physical_board_id = cell[_SECTION_BOARD_ID]
+        if not physical_board_id:
+            errors.append(
+                f"{cell.get('CELL_ID', '<unknown cell>')} appears outside a board section"
+            )
+        if "BOARD_ID" in cell:
+            errors.append(
+                f"{cell.get('CELL_ID', '<unknown cell>')} cell BOARD_ID cannot change "
+                f"its physical board section {physical_board_id!r}"
+            )
+        cells_by_board.setdefault(physical_board_id, []).append(cell)
 
     if expected_boards is EXPECTED_BOARDS:
-        if len(source_shots) != 23:
+        if source_block_count != 23:
             errors.append(
-                "source storyboard must contain exactly 23 shots, "
-                f"got {len(source_shots)}"
+                "source storyboard must contain exactly 23 shots (shot blocks), "
+                f"got {source_block_count}"
+            )
+        if source_declaration_count != 23:
+            errors.append(
+                "source storyboard must contain exactly 23 SHOT_ID declarations, "
+                f"got {source_declaration_count}"
             )
         if len(cells) != 24:
             errors.append(
@@ -215,6 +324,15 @@ def validate_review(
             )
         else:
             qa_cell = qa_cells[0]
+            if (
+                qa_cell[_SECTION_BOARD_ID] != "SB-04"
+                or qa_cell[_SECTION_CELL_POSITION] != "6"
+            ):
+                errors.append(
+                    "QA_ONLY must belong to the SB-04 section at position 6, "
+                    f"got section {qa_cell[_SECTION_BOARD_ID]!r} position "
+                    f"{qa_cell[_SECTION_CELL_POSITION]}"
+                )
             for field, required_value in (
                 ("CELL_ID", "SB-04-C06"),
                 ("GENERATE_IMAGE", "NO"),
@@ -258,10 +376,22 @@ def validate_review(
                 errors.append(f"{board_id} references unknown source shot {shot_id!r}")
                 continue
             for field in MIRRORED_FIELDS:
-                if cell.get(field) != source.get(field):
+                source_has_field = field in source
+                review_has_field = field in cell
+                if not source_has_field:
+                    errors.append(
+                        f"source storyboard shot {shot_id} missing {field}"
+                    )
+                if not review_has_field:
+                    errors.append(f"review SHOT card {shot_id} missing {field}")
+                if (
+                    source_has_field
+                    and review_has_field
+                    and cell[field] != source[field]
+                ):
                     errors.append(
                         f"{board_id} {shot_id} {field} must exactly match source: "
-                        f"expected {source.get(field)!r}, got {cell.get(field)!r}"
+                        f"expected {source[field]!r}, got {cell[field]!r}"
                     )
 
     return errors

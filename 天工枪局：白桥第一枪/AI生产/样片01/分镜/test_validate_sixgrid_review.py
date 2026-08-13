@@ -204,6 +204,66 @@ IMAGE_STATUS: NOT_GENERATED
         )
         self.assertTrue(any("DIALOGUE must exactly match" in item for item in errors))
 
+    def test_rejects_mirrored_field_missing_from_review_card(self):
+        altered = self.review.replace("ADVISORY_DURATION: 4.8s\n", "", 1)
+        errors = validate_review(
+            self.storyboard,
+            altered,
+            expected_boards={"SB-T01": ("S01_SH01", "S01_SH02")},
+            check_sha=False,
+        )
+        self.assertTrue(
+            any(
+                "review SHOT card S01_SH01 missing ADVISORY_DURATION" in item
+                for item in errors
+            )
+        )
+
+    def test_rejects_mirrored_field_missing_from_source_shot(self):
+        altered = self.storyboard.replace(
+            "DIALOGUE: CHEN_MO（off_screen_radio）：“A1 两个。一个贴三箱，后面还有。”\n",
+            "",
+            1,
+        )
+        errors = validate_review(
+            altered,
+            self.review,
+            expected_boards={"SB-T01": ("S01_SH01", "S01_SH02")},
+            check_sha=False,
+        )
+        self.assertTrue(
+            any(
+                "source storyboard shot S01_SH01 missing DIALOGUE" in item
+                for item in errors
+            )
+        )
+
+    def test_rejects_mirrored_field_missing_from_both_sides(self):
+        timing = (
+            "DIALOGUE_TIMING: "
+            "CHEN_MO|off_screen_radio|0.4-3.9s|before=0.4|after=0.6\n"
+        )
+        storyboard = self.storyboard.replace(timing, "", 1)
+        review = self.review.replace(timing, "", 1)
+        errors = validate_review(
+            storyboard,
+            review,
+            expected_boards={"SB-T01": ("S01_SH01", "S01_SH02")},
+            check_sha=False,
+        )
+        self.assertTrue(
+            any(
+                "source storyboard shot S01_SH01 missing DIALOGUE_TIMING" in item
+                for item in errors
+            )
+        )
+        self.assertTrue(
+            any(
+                "review SHOT card S01_SH01 missing DIALOGUE_TIMING" in item
+                for item in errors
+            )
+        )
+
     def test_rejects_a_duplicate_review_field(self):
         original = "DIALOGUE: CHEN_MO（off_screen_radio）：“A1 两个。一个贴三箱，后面还有。”"
         altered = self.review.replace(
@@ -316,6 +376,84 @@ IMAGE_STATUS: NOT_GENERATED
         errors = validate_review(storyboard, altered, check_sha=False)
         self.assertTrue(any("board order" in item for item in errors))
 
+    def test_rejects_a_shot_physically_under_the_wrong_board(self):
+        storyboard, review = build_production_documents()
+        board_start = review.index("## SB-02")
+        first_cell_start = review.index("### 格 01", board_start)
+        second_cell_start = review.index("### 格 02", first_cell_start)
+        first_cell = review[first_cell_start:second_cell_start].replace(
+            "CELL_TYPE: SHOT\n",
+            "CELL_TYPE: SHOT\nBOARD_ID: SB-02\n",
+            1,
+        )
+        altered = (
+            review[:board_start]
+            + first_cell
+            + review[board_start:first_cell_start]
+            + review[second_cell_start:]
+        )
+        errors = validate_review(storyboard, altered, check_sha=False)
+        self.assertTrue(any("physical board section" in item for item in errors))
+
+    def test_rejects_a_cell_before_every_board_section(self):
+        first_board_start = self.review.index("## SB-T01")
+        first_cell_start = self.review.index("### 格 01")
+        second_cell_start = self.review.index("### 格 02")
+        first_cell = self.review[first_cell_start:second_cell_start].replace(
+            "CELL_TYPE: SHOT\n",
+            "CELL_TYPE: SHOT\nBOARD_ID: SB-T01\n",
+            1,
+        )
+        altered = (
+            self.review[:first_board_start]
+            + first_cell
+            + self.review[first_board_start:first_cell_start]
+            + self.review[second_cell_start:]
+        )
+        errors = validate_review(
+            self.storyboard,
+            altered,
+            expected_boards={"SB-T01": ("S01_SH01", "S01_SH02")},
+            check_sha=False,
+        )
+        self.assertTrue(any("outside a board section" in item for item in errors))
+
+    def test_rejects_missing_or_mismatched_board_declarations(self):
+        cases = (
+            self.review.replace("BOARD_ID: SB-T01", "BOARD_ID: SB-WRONG", 1),
+            self.review.replace("BOARD_ID: SB-T01\n", "", 1),
+        )
+        for altered in cases:
+            with self.subTest(review=altered):
+                errors = validate_review(
+                    self.storyboard,
+                    altered,
+                    expected_boards={"SB-T01": ("S01_SH01", "S01_SH02")},
+                    check_sha=False,
+                )
+                self.assertTrue(any("board-level BOARD_ID" in item for item in errors))
+
+    def test_qa_cell_must_be_sixth_in_the_physical_sb04_section(self):
+        storyboard, review = build_production_documents()
+        board_start = review.index("## SB-04")
+        first_cell_start = review.index("### 格 01", board_start)
+        board_header = review[board_start:first_cell_start]
+        forged_cells = review[first_cell_start:].replace(
+            "CELL_TYPE: SHOT\n",
+            "CELL_TYPE: SHOT\nBOARD_ID: SB-04\n",
+        ).replace(
+            "CELL_TYPE: QA_ONLY\n",
+            "CELL_TYPE: QA_ONLY\nBOARD_ID: SB-04\n",
+        )
+        altered = review[:board_start] + forged_cells + board_header
+        errors = validate_review(storyboard, altered, check_sha=False)
+        self.assertTrue(
+            any(
+                "QA_ONLY must belong to the SB-04 section at position 6" in item
+                for item in errors
+            )
+        )
+
     def test_production_layout_requires_exactly_23_shot_cards(self):
         storyboard, review = build_production_documents()
         fifth_cell_start = review.rindex("### 格 05")
@@ -337,6 +475,27 @@ IMAGE_STATUS: NOT_GENERATED
         altered = storyboard + "### 分镜 extra\nSHOT_ID: S99_SH99\n"
         errors = validate_review(altered, review, check_sha=False)
         self.assertTrue(any("source storyboard must contain exactly 23 shots" in item for item in errors))
+
+    def test_production_layout_rejects_a_duplicate_source_shot_id(self):
+        storyboard, review = build_production_documents()
+        second_block_start = storyboard.index("### 分镜 S01_SH02")
+        duplicate_first_block = storyboard[:second_block_start]
+        errors = validate_review(
+            storyboard + duplicate_first_block,
+            review,
+            check_sha=False,
+        )
+        self.assertTrue(
+            any("duplicate source SHOT_ID S01_SH01" in item for item in errors)
+        )
+
+    def test_production_layout_rejects_a_source_block_without_shot_id(self):
+        storyboard, review = build_production_documents()
+        altered = storyboard + "### 分镜 orphan\nSCENE: no identifier\n"
+        errors = validate_review(altered, review, check_sha=False)
+        self.assertTrue(
+            any("source shot block 24 missing SHOT_ID" in item for item in errors)
+        )
 
     def test_cli_reports_a_valid_source_locked_production_review(self):
         storyboard, review = build_production_documents()
