@@ -245,7 +245,7 @@ git commit -m 'test: validate chapter 1 six-grid review boards'
 
 ```text
 SOURCE_STORYBOARD: 分镜/第01章_样片逐镜头分镜_重制版.md
-SOURCE_STORYBOARD_SHA256: 05912307332ed224bf4270373f33d0415fce814a9768a62162f416bf0e489490
+SOURCE_STORYBOARD_SHA256: fe6abb8a4adf1febd9a1b3ae98e2f35c59b5aa9edf2222075dc30f7e8a933fb0
 BOARD_LAYOUT: PORTRAIT_2X3
 SHOT_FRAME_RATIO: 9:16
 VISUAL_STYLE: 电影级 3D 国漫写实
@@ -299,7 +299,7 @@ CELL_TYPE: QA_ONLY
 GENERATE_IMAGE: NO
 IMAGE_STATUS: NOT_APPLICABLE
 QA_DIALOGUE_LOCK: 给不给闪？／给。／你又想看两条线。／对。／右廊可能一个，距离不确定。近点先打，我补近点。右边出声再转。／收到。／右廊到门，半秒！／第五个人填谁？／也好。／第一枪，从白桥开始。
-QA_SOUND_LOCK: 第一轮无胜利音乐；第二轮近点击杀完成并留反应空隙后才报右廊；结尾只保留夜雨、纸张与笔尖声。
+QA_SOUND_LOCK: 第一轮无胜利音乐；第二轮近点击杀完成并留反应空隙后才报右廊；结尾环境与拟音只保留夜雨、纸张与笔尖声；对白与内心声按 QA_DIALOGUE_LOCK。
 QA_CONTINUITY_LOCK: 第一轮与第二轮复用同一乙仓轴线；第二轮严格先补近点再转右廊；报名桌仅在结尾使用。
 ```
 
