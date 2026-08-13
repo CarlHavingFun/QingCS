@@ -1,0 +1,306 @@
+#!/usr/bin/env python3
+"""Validate source-locked chapter-1 six-grid storyboard review boards."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import re
+import sys
+from pathlib import Path
+
+
+EXPECTED_BOARDS = {
+    "SB-01": (
+        "S01_SH01", "S01_SH02", "S01_SH03", "S01_SH04",
+        "S02_SH01", "S02_SH02A",
+    ),
+    "SB-02": (
+        "S02_SH02B", "S03_SH01", "S03_SH02", "S03_SH03",
+        "S03_SH04A", "S03_SH04B",
+    ),
+    "SB-03": (
+        "S03_SH04C", "S04_SH01", "S04_SH02", "S04_SH03A",
+        "S04_SH03B", "S04_SH04",
+    ),
+    "SB-04": (
+        "S05_SH01", "S05_SH02", "S06_SH01A", "S06_SH01B",
+        "S07_SH01",
+    ),
+}
+
+MIRRORED_FIELDS = (
+    "SCENE", "ANCHOR_REFS", "ADVISORY_DURATION", "CAMERA_SIZE",
+    "CAMERA_MOVE", "ACTION_START", "ACTION_END", "DIALOGUE",
+    "DIALOGUE_TIMING", "SOUND", "CONTINUITY_IN", "CONTINUITY_OUT",
+    "POST_TEXT", "KEYFRAME_MOMENT",
+)
+
+_FIELD_RE = re.compile(r"^([A-Z][A-Z0-9_]*):\s*(.*?)\s*$")
+_STORYBOARD_HEADING_RE = re.compile(r"^###\s+分镜(?:\s|$)")
+_BOARD_HEADING_RE = re.compile(r"^##\s+(SB-[A-Za-z0-9-]+)\s*$")
+_CELL_HEADING_RE = re.compile(r"^###\s+格(?:\s|$)")
+
+
+def parse_storyboard(text: str) -> dict[str, dict[str, str]]:
+    """Parse storyboard shot blocks keyed by ``SHOT_ID``."""
+
+    shots: dict[str, dict[str, str]] = {}
+    current: dict[str, str] | None = None
+
+    def store_current() -> None:
+        if current is not None and current.get("SHOT_ID"):
+            shots[current["SHOT_ID"]] = dict(current)
+
+    for line in text.splitlines():
+        if _STORYBOARD_HEADING_RE.match(line):
+            store_current()
+            current = {}
+            continue
+
+        match = _FIELD_RE.match(line)
+        if match is None:
+            continue
+        field, value = match.groups()
+        if field == "SHOT_ID":
+            if current is not None and current.get("SHOT_ID"):
+                store_current()
+                current = {}
+            elif current is None:
+                current = {}
+        if current is not None:
+            current[field] = value
+
+    store_current()
+    return shots
+
+
+def parse_review(text: str) -> tuple[dict[str, str], list[dict[str, str]]]:
+    """Parse review headers and cells, preserving each cell's board ID."""
+
+    header: dict[str, str] = {}
+    cells: list[dict[str, str]] = []
+    board_id = ""
+    current: dict[str, str] | None = None
+
+    for line in text.splitlines():
+        board_match = _BOARD_HEADING_RE.match(line)
+        if board_match is not None:
+            if current is not None:
+                cells.append(current)
+                current = None
+            board_id = board_match.group(1)
+            continue
+
+        if _CELL_HEADING_RE.match(line):
+            if current is not None:
+                cells.append(current)
+            current = {"BOARD_ID": board_id}
+            continue
+
+        field_match = _FIELD_RE.match(line)
+        if field_match is None:
+            continue
+        field, value = field_match.groups()
+        if current is None:
+            if not board_id:
+                header[field] = value
+        else:
+            current[field] = value
+
+    if current is not None:
+        cells.append(current)
+    return header, cells
+
+
+def _duplicate_review_field_errors(text: str) -> list[str]:
+    """Report repeated fields within one header, board, or cell scope."""
+
+    errors: list[str] = []
+    seen: set[str] = set()
+    scope = "header"
+    for line_number, line in enumerate(text.splitlines(), start=1):
+        board_match = _BOARD_HEADING_RE.match(line)
+        if board_match is not None:
+            seen = set()
+            scope = board_match.group(1)
+            continue
+        if _CELL_HEADING_RE.match(line):
+            seen = set()
+            scope = line.strip()
+            continue
+        field_match = _FIELD_RE.match(line)
+        if field_match is None:
+            continue
+        field = field_match.group(1)
+        if field in seen:
+            errors.append(f"review line {line_number} {scope} repeats {field}")
+        seen.add(field)
+    return errors
+
+
+def validate_review(
+    storyboard_text: str,
+    review_text: str,
+    expected_boards: dict[str, tuple[str, ...]] = EXPECTED_BOARDS,
+    check_sha: bool = True,
+) -> list[str]:
+    """Return every violation found in a six-grid review document."""
+
+    errors = _duplicate_review_field_errors(review_text)
+    source_shots = parse_storyboard(storyboard_text)
+    header, cells = parse_review(review_text)
+
+    for field, required_value in (
+        ("BOARD_LAYOUT", "PORTRAIT_2X3"),
+        ("SHOT_FRAME_RATIO", "9:16"),
+    ):
+        actual_value = header.get(field)
+        if actual_value != required_value:
+            errors.append(
+                f"{field} must be {required_value!r}, got {actual_value!r}"
+            )
+
+    if check_sha:
+        expected_sha = hashlib.sha256(storyboard_text.encode("utf-8")).hexdigest()
+        actual_sha = header.get("SOURCE_STORYBOARD_SHA256")
+        if actual_sha != expected_sha:
+            errors.append(
+                "SOURCE_STORYBOARD_SHA256 must match the source storyboard: "
+                f"expected {expected_sha}, got {actual_sha!r}"
+            )
+
+    board_order = tuple(
+        match.group(1)
+        for line in review_text.splitlines()
+        if (match := _BOARD_HEADING_RE.match(line)) is not None
+    )
+    required_board_order = tuple(expected_boards)
+    if board_order != required_board_order:
+        errors.append(
+            f"board order must be {required_board_order!r}, got {board_order!r}"
+        )
+
+    cells_by_board: dict[str, list[dict[str, str]]] = {}
+    for cell in cells:
+        cells_by_board.setdefault(cell.get("BOARD_ID", ""), []).append(cell)
+
+    if expected_boards is EXPECTED_BOARDS:
+        if len(source_shots) != 23:
+            errors.append(
+                "source storyboard must contain exactly 23 shots, "
+                f"got {len(source_shots)}"
+            )
+        if len(cells) != 24:
+            errors.append(
+                f"production review must contain exactly 24 cells, got {len(cells)}"
+            )
+        all_shot_cells = [cell for cell in cells if cell.get("CELL_TYPE") == "SHOT"]
+        if len(all_shot_cells) != 23:
+            errors.append(
+                "production review must contain exactly 23 SHOT cards, "
+                f"got {len(all_shot_cells)}"
+            )
+        unique_shot_ids = {cell.get("SHOT_ID", "") for cell in all_shot_cells}
+        if len(unique_shot_ids) != 23:
+            errors.append(
+                "production review must contain exactly 23 unique SHOT_ID values, "
+                f"got {len(unique_shot_ids)}"
+            )
+        qa_cells = [cell for cell in cells if cell.get("CELL_TYPE") == "QA_ONLY"]
+        if len(qa_cells) != 1:
+            errors.append(
+                "production review must contain exactly one QA_ONLY cell, "
+                f"got {len(qa_cells)}"
+            )
+        else:
+            qa_cell = qa_cells[0]
+            for field, required_value in (
+                ("CELL_ID", "SB-04-C06"),
+                ("GENERATE_IMAGE", "NO"),
+                ("IMAGE_STATUS", "NOT_APPLICABLE"),
+            ):
+                actual_value = qa_cell.get(field)
+                if actual_value != required_value:
+                    errors.append(
+                        f"QA_ONLY {field} must be {required_value!r}, "
+                        f"got {actual_value!r}"
+                    )
+
+    for board_id, expected_shots in expected_boards.items():
+        board_cells = cells_by_board.get(board_id, [])
+        for position, cell in enumerate(board_cells, start=1):
+            required_cell_id = f"{board_id}-C{position:02d}"
+            if cell.get("CELL_ID") != required_cell_id:
+                errors.append(
+                    f"{board_id} cell {position} CELL_ID must be "
+                    f"{required_cell_id!r}, got {cell.get('CELL_ID')!r}"
+                )
+        shot_cells = [
+            cell for cell in board_cells if cell.get("CELL_TYPE") == "SHOT"
+        ]
+        actual_shots = tuple(cell.get("SHOT_ID", "") for cell in shot_cells)
+        if actual_shots != expected_shots:
+            errors.append(
+                f"{board_id} shot order must be {expected_shots!r}, "
+                f"got {actual_shots!r}"
+            )
+
+        for cell in shot_cells:
+            shot_id = cell.get("SHOT_ID", "")
+            if cell.get("IMAGE_STATUS") != "NOT_GENERATED":
+                errors.append(
+                    f"{board_id} {shot_id} IMAGE_STATUS must be "
+                    f"'NOT_GENERATED', got {cell.get('IMAGE_STATUS')!r}"
+                )
+            source = source_shots.get(shot_id)
+            if source is None:
+                errors.append(f"{board_id} references unknown source shot {shot_id!r}")
+                continue
+            for field in MIRRORED_FIELDS:
+                if cell.get(field) != source.get(field):
+                    errors.append(
+                        f"{board_id} {shot_id} {field} must exactly match source: "
+                        f"expected {source.get(field)!r}, got {cell.get(field)!r}"
+                    )
+
+    return errors
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the fixed two-path command-line interface."""
+
+    parser = argparse.ArgumentParser(
+        description="Validate a source-locked chapter-1 six-grid review."
+    )
+    parser.add_argument("--storyboard", required=True, type=Path)
+    parser.add_argument("--review", required=True, type=Path)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the validator without modifying either input document."""
+
+    args = build_parser().parse_args(argv)
+    try:
+        storyboard_text = args.storyboard.read_text(encoding="utf-8")
+        review_text = args.review.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        print(f"ERROR: cannot read input: {exc}", file=sys.stderr)
+        return 1
+
+    errors = validate_review(storyboard_text, review_text)
+    if errors:
+        for error in errors:
+            print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+
+    print(
+        "PASS: 4 boards / 24 cells / 23 source-locked shots / "
+        "1 QA-only cell; frame ratio 9:16; image production stopped."
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
