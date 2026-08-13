@@ -34,17 +34,53 @@ PRODUCTION_MIRRORED_FIELDS = (
     "POST_TEXT", "KEYFRAME_MOMENT",
 )
 
+PRODUCTION_QA_LOCKS = {
+    "QA_DIALOGUE_LOCK": (
+        "给不给闪？／给。／你又想看两条线。／对。／右廊可能一个，距离不确定。"
+        "近点先打，我补近点。右边出声再转。／收到。／右廊到门，半秒！／"
+        "第五个人填谁？／也好。／第一枪，从白桥开始。"
+    ),
+    "QA_SOUND_LOCK": (
+        "第一轮无胜利音乐；第二轮近点击杀完成并留反应空隙后才报右廊；"
+        "结尾环境与拟音只保留夜雨、纸张与笔尖声；对白与内心声按 QA_DIALOGUE_LOCK。"
+    ),
+    "QA_CONTINUITY_LOCK": (
+        "第一轮与第二轮复用同一乙仓轴线；第二轮严格先补近点再转右廊；"
+        "报名桌仅在结尾使用。"
+    ),
+}
+
 
 def build_production_documents(include_qa=True):
     storyboard_lines = []
     review_lines = [
+        "SOURCE_STORYBOARD: 分镜/第01章_样片逐镜头分镜_重制版.md",
         "SOURCE_STORYBOARD_SHA256: ignored-in-unit-test",
         "BOARD_LAYOUT: PORTRAIT_2X3",
         "SHOT_FRAME_RATIO: 9:16",
+        "VISUAL_STYLE: 电影级 3D 国漫写实",
+        "IMAGE_PRODUCTION: STOPPED_PENDING_REVIEW",
     ]
 
     for board_id, shot_ids in PRODUCTION_BOARDS.items():
-        review_lines.extend((f"## {board_id}", f"BOARD_ID: {board_id}"))
+        index_labels = list(shot_ids)
+        if board_id == "SB-04":
+            index_labels.append("审核栏／不生图")
+        review_lines.extend(
+            (
+                f"## {board_id}",
+                "| 左列 | 右列 |",
+                "|---|---|",
+            )
+        )
+        for row_start in range(0, 6, 2):
+            left_number = row_start + 1
+            right_number = row_start + 2
+            review_lines.append(
+                f"| {board_id}-C{left_number:02d} — {index_labels[row_start]} "
+                f"| {board_id}-C{right_number:02d} — {index_labels[row_start + 1]} |"
+            )
+        review_lines.append(f"BOARD_ID: {board_id}")
         for cell_number, shot_id in enumerate(shot_ids, start=1):
             values = {
                 "SCENE": f"scene {shot_id}",
@@ -90,6 +126,9 @@ def build_production_documents(include_qa=True):
                 "GENERATE_IMAGE: NO",
                 "IMAGE_STATUS: NOT_APPLICABLE",
             )
+        )
+        review_lines.extend(
+            f"{field}: {value}" for field, value in PRODUCTION_QA_LOCKS.items()
         )
 
     return "\n".join(storyboard_lines) + "\n", "\n".join(review_lines) + "\n"
@@ -299,20 +338,53 @@ IMAGE_STATUS: NOT_GENERATED
             any("SOURCE_STORYBOARD_SHA256 must match" in item for item in errors)
         )
 
-    def test_rejects_invalid_review_format_headers(self):
-        cases = (
-            ("BOARD_LAYOUT: PORTRAIT_2X3", "BOARD_LAYOUT: LANDSCAPE_3X2", "BOARD_LAYOUT"),
-            ("SHOT_FRAME_RATIO: 9:16", "SHOT_FRAME_RATIO: 16:9", "SHOT_FRAME_RATIO"),
+    def test_production_requires_exact_locked_headers(self):
+        storyboard, review = build_production_documents()
+        required_headers = (
+            ("SOURCE_STORYBOARD", "分镜/第01章_样片逐镜头分镜_重制版.md"),
+            ("BOARD_LAYOUT", "PORTRAIT_2X3"),
+            ("SHOT_FRAME_RATIO", "9:16"),
+            ("VISUAL_STYLE", "电影级 3D 国漫写实"),
+            ("IMAGE_PRODUCTION", "STOPPED_PENDING_REVIEW"),
         )
-        for original, replacement, error_field in cases:
-            with self.subTest(field=error_field):
-                errors = validate_review(
-                    self.storyboard,
-                    self.review.replace(original, replacement),
-                    expected_boards={"SB-T01": ("S01_SH01", "S01_SH02")},
-                    check_sha=False,
-                )
-                self.assertTrue(any(error_field in item for item in errors))
+        for field, value in required_headers:
+            original = f"{field}: {value}\n"
+            for mutation, replacement in (
+                ("missing", ""),
+                ("corrupt", f"{field}: CORRUPTED\n"),
+            ):
+                with self.subTest(field=field, mutation=mutation):
+                    errors = validate_review(
+                        storyboard,
+                        review.replace(original, replacement, 1),
+                        check_sha=False,
+                    )
+                    self.assertTrue(any(field in item for item in errors))
+
+    def test_custom_mapping_does_not_require_production_headers(self):
+        review = self.review.replace("BOARD_LAYOUT: PORTRAIT_2X3\n", "").replace(
+            "SHOT_FRAME_RATIO: 9:16\n", ""
+        )
+        errors = validate_review(
+            self.storyboard,
+            review,
+            expected_boards={"SB-T01": ("S01_SH01", "S01_SH02")},
+            check_sha=False,
+        )
+        self.assertEqual([], errors)
+
+    def test_custom_mapping_still_checks_sha_when_enabled(self):
+        review = self.review.replace("BOARD_LAYOUT: PORTRAIT_2X3\n", "").replace(
+            "SHOT_FRAME_RATIO: 9:16\n", ""
+        )
+        errors = validate_review(
+            self.storyboard,
+            review,
+            expected_boards={"SB-T01": ("S01_SH01", "S01_SH02")},
+        )
+        self.assertTrue(
+            any("SOURCE_STORYBOARD_SHA256 must match" in item for item in errors)
+        )
 
     def test_rejects_generated_shot_image_status(self):
         altered = self.review.replace(
@@ -362,6 +434,22 @@ IMAGE_STATUS: NOT_GENERATED
                 )
                 self.assertTrue(any(expected_error in item for item in errors))
 
+    def test_production_qa_locks_are_exact(self):
+        storyboard, review = build_production_documents()
+        for field, value in PRODUCTION_QA_LOCKS.items():
+            original = f"{field}: {value}\n"
+            for mutation, replacement in (
+                ("missing", ""),
+                ("corrupt", f"{field}: CORRUPTED\n"),
+            ):
+                with self.subTest(field=field, mutation=mutation):
+                    errors = validate_review(
+                        storyboard,
+                        review.replace(original, replacement, 1),
+                        check_sha=False,
+                    )
+                    self.assertTrue(any(field in item for item in errors))
+
     def test_rejects_reordered_board_sections(self):
         storyboard, review = build_production_documents()
         first_start = review.index("## SB-01")
@@ -375,6 +463,46 @@ IMAGE_STATUS: NOT_GENERATED
         )
         errors = validate_review(storyboard, altered, check_sha=False)
         self.assertTrue(any("board order" in item for item in errors))
+
+    def test_production_rejects_swapped_visible_index_cells(self):
+        storyboard, review = build_production_documents()
+        altered = review.replace(
+            "| SB-01-C01 — S01_SH01 | SB-01-C02 — S01_SH02 |",
+            "| SB-01-C02 — S01_SH02 | SB-01-C01 — S01_SH01 |",
+            1,
+        )
+        errors = validate_review(storyboard, altered, check_sha=False)
+        self.assertTrue(any("visible index" in item for item in errors))
+
+    def test_production_rejects_an_omitted_visible_index_row(self):
+        storyboard, review = build_production_documents()
+        altered = review.replace(
+            "| SB-02-C05 — S03_SH04A | SB-02-C06 — S03_SH04B |\n",
+            "",
+            1,
+        )
+        errors = validate_review(storyboard, altered, check_sha=False)
+        self.assertTrue(any("visible index" in item for item in errors))
+
+    def test_production_rejects_a_duplicated_visible_index_cell(self):
+        storyboard, review = build_production_documents()
+        altered = review.replace(
+            "| SB-03-C01 — S03_SH04C | SB-03-C02 — S04_SH01 |",
+            "| SB-03-C01 — S03_SH04C | SB-03-C01 — S03_SH04C |",
+            1,
+        )
+        errors = validate_review(storyboard, altered, check_sha=False)
+        self.assertTrue(any("visible index" in item for item in errors))
+
+    def test_production_rejects_a_falsified_sb04_index_cell(self):
+        storyboard, review = build_production_documents()
+        altered = review.replace(
+            "| SB-04-C05 — S07_SH01 | SB-04-C06 — 审核栏／不生图 |",
+            "| SB-04-C05 — S07_SH01 | SB-04-C06 — 审核栏／生图 |",
+            1,
+        )
+        errors = validate_review(storyboard, altered, check_sha=False)
+        self.assertTrue(any("visible index" in item for item in errors))
 
     def test_rejects_a_shot_physically_under_the_wrong_board(self):
         storyboard, review = build_production_documents()

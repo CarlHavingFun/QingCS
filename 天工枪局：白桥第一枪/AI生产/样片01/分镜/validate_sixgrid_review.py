@@ -36,9 +36,36 @@ MIRRORED_FIELDS = (
     "POST_TEXT", "KEYFRAME_MOMENT",
 )
 
+PRODUCTION_HEADERS = (
+    ("SOURCE_STORYBOARD", "分镜/第01章_样片逐镜头分镜_重制版.md"),
+    ("BOARD_LAYOUT", "PORTRAIT_2X3"),
+    ("SHOT_FRAME_RATIO", "9:16"),
+    ("VISUAL_STYLE", "电影级 3D 国漫写实"),
+    ("IMAGE_PRODUCTION", "STOPPED_PENDING_REVIEW"),
+)
+
+PRODUCTION_QA_LOCKS = (
+    (
+        "QA_DIALOGUE_LOCK",
+        "给不给闪？／给。／你又想看两条线。／对。／右廊可能一个，距离不确定。"
+        "近点先打，我补近点。右边出声再转。／收到。／右廊到门，半秒！／"
+        "第五个人填谁？／也好。／第一枪，从白桥开始。",
+    ),
+    (
+        "QA_SOUND_LOCK",
+        "第一轮无胜利音乐；第二轮近点击杀完成并留反应空隙后才报右廊；"
+        "结尾环境与拟音只保留夜雨、纸张与笔尖声；对白与内心声按 QA_DIALOGUE_LOCK。",
+    ),
+    (
+        "QA_CONTINUITY_LOCK",
+        "第一轮与第二轮复用同一乙仓轴线；第二轮严格先补近点再转右廊；"
+        "报名桌仅在结尾使用。",
+    ),
+)
+
 _FIELD_RE = re.compile(r"^([A-Z][A-Z0-9_]*):\s*(.*?)\s*$")
 _STORYBOARD_HEADING_RE = re.compile(r"^###\s+分镜(?:\s|$)")
-_BOARD_HEADING_RE = re.compile(r"^##\s+(SB-[A-Za-z0-9-]+)\s*$")
+_BOARD_HEADING_RE = re.compile(r"^##\s+(SB-[A-Za-z0-9-]+)\s*$", re.MULTILINE)
 _CELL_HEADING_RE = re.compile(r"^###\s+格(?:\s|$)")
 _SECTION_BOARD_ID = "__SECTION_BOARD_ID"
 _SECTION_CELL_POSITION = "__SECTION_CELL_POSITION"
@@ -226,6 +253,65 @@ def _board_declaration_errors(text: str) -> list[str]:
     return errors
 
 
+def _expected_production_index_lines(
+    board_id: str,
+    shot_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Build the exact visible 2×3 index required above one production board."""
+
+    labels = list(shot_ids)
+    if board_id == "SB-04":
+        labels.append("审核栏／不生图")
+
+    lines = ["| 左列 | 右列 |", "|---|---|"]
+    for row_start in range(0, 6, 2):
+        left_number = row_start + 1
+        right_number = row_start + 2
+        lines.append(
+            f"| {board_id}-C{left_number:02d} — {labels[row_start]} "
+            f"| {board_id}-C{right_number:02d} — {labels[row_start + 1]} |"
+        )
+    return tuple(lines)
+
+
+def _production_index_errors(text: str) -> list[str]:
+    """Validate each board's visible Markdown index before its BOARD_ID line."""
+
+    headings = list(_BOARD_HEADING_RE.finditer(text))
+    indexes: dict[str, tuple[str, ...]] = {}
+    for position, heading in enumerate(headings):
+        section_end = (
+            headings[position + 1].start()
+            if position + 1 < len(headings)
+            else len(text)
+        )
+        section_body = text[heading.end():section_end]
+        declaration = re.search(
+            r"^BOARD_ID:\s*.*$",
+            section_body,
+            flags=re.MULTILINE,
+        )
+        index_text = (
+            section_body[:declaration.start()]
+            if declaration is not None
+            else section_body
+        )
+        indexes[heading.group(1)] = tuple(
+            line.strip() for line in index_text.splitlines() if line.strip()
+        )
+
+    errors: list[str] = []
+    for board_id, shot_ids in EXPECTED_BOARDS.items():
+        expected_lines = _expected_production_index_lines(board_id, shot_ids)
+        actual_lines = indexes.get(board_id, ())
+        if actual_lines != expected_lines:
+            errors.append(
+                f"{board_id} visible index must be exactly {expected_lines!r}, "
+                f"got {actual_lines!r}"
+            )
+    return errors
+
+
 def validate_review(
     storyboard_text: str,
     review_text: str,
@@ -244,16 +330,6 @@ def validate_review(
     ) = _parse_storyboard_internal(storyboard_text)
     errors.extend(source_parse_errors)
     header, cells = _parse_review_internal(review_text)
-
-    for field, required_value in (
-        ("BOARD_LAYOUT", "PORTRAIT_2X3"),
-        ("SHOT_FRAME_RATIO", "9:16"),
-    ):
-        actual_value = header.get(field)
-        if actual_value != required_value:
-            errors.append(
-                f"{field} must be {required_value!r}, got {actual_value!r}"
-            )
 
     if check_sha:
         expected_sha = hashlib.sha256(storyboard_text.encode("utf-8")).hexdigest()
@@ -290,6 +366,13 @@ def validate_review(
         cells_by_board.setdefault(physical_board_id, []).append(cell)
 
     if expected_boards is EXPECTED_BOARDS:
+        for field, required_value in PRODUCTION_HEADERS:
+            actual_value = header.get(field)
+            if actual_value != required_value:
+                errors.append(
+                    f"{field} must be {required_value!r}, got {actual_value!r}"
+                )
+        errors.extend(_production_index_errors(review_text))
         if source_block_count != 23:
             errors.append(
                 "source storyboard must contain exactly 23 shots (shot blocks), "
@@ -333,11 +416,12 @@ def validate_review(
                     f"got section {qa_cell[_SECTION_BOARD_ID]!r} position "
                     f"{qa_cell[_SECTION_CELL_POSITION]}"
                 )
-            for field, required_value in (
+            qa_required_fields = (
                 ("CELL_ID", "SB-04-C06"),
                 ("GENERATE_IMAGE", "NO"),
                 ("IMAGE_STATUS", "NOT_APPLICABLE"),
-            ):
+            ) + PRODUCTION_QA_LOCKS
+            for field, required_value in qa_required_fields:
                 actual_value = qa_cell.get(field)
                 if actual_value != required_value:
                     errors.append(
