@@ -1,0 +1,26 @@
+name: Check MiniMax readiness
+
+on:
+  push:
+    branches:
+      - feat/final-visual-production
+    paths:
+      - .github/workflows/check-minimax.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+    steps:
+      - name: Check secret availability
+        shell: bash
+        run: |
+          if [[ -n "$MINIMAX_API_KEY" ]]; then
+            echo "MINIMAX_SECRET_PRESENT=yes"
+          else
+            echo "MINIMAX_SECRET_PRESENT=no"
+          fi
