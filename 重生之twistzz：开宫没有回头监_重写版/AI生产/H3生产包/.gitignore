@@ -1,0 +1,6 @@
+output/
+state/
+generated/*.json
+!generated/README.md
+__pycache__/
+*.pyc

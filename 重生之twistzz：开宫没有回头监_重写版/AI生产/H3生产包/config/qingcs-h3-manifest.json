@@ -1,0 +1,447 @@
+{
+  "schema_version": "1.0",
+  "project_id": "qingcs-rewrite-minimax-h3",
+  "project_root": "../../..",
+  "source_scope": {
+    "executable_chapters": "01-44",
+    "future_outline": "05_第二篇章Ch45—56总纲.md",
+    "future_outline_policy": "45—56只有总纲，不生成可付费执行的伪分镜任务。正文和十格分镜完成后再加入 chapters。"
+  },
+  "defaults": {
+    "model": "MiniMax-H3",
+    "duration": 15,
+    "ratio": "16:9",
+    "style_lock": "电影级半写实国漫；真实人体比例和自然表演；漆木、青砖、金属、玻璃、织物与现代设备材质可触；平行现代大清而非古代片场；摄影式构图、可信景深和克制运动；比赛空间优先保证人数、位置、目标、枪线与责任链可读。",
+    "global_negative": "Q版、纯二维平涂、照片化真人肖像、现实职业选手脸、现实战队与赞助商、随机可读文字、伪比分、伪HUD、过量珠翠、大拉翅、赛博霓虹、漂浮UI、魔法粒子、古代火器替代现代竞技枪械、错误手指、额外人物、同脸、性别错置、无动机越轴、瞬移、无来源枪声、英雄海报定格。",
+    "post_text_policy": "比分、姓名、地图名、HUD、赛务字段、名册、合同、印章、门禁记录和直播标题一律只保留清楚版面与安全区，由后期精确合成；对白可以进入H3声音描述，但不得扩写未锁定台词。",
+    "output_root": "AI生产/H3生产包/output"
+  },
+  "registries": {
+    "characters": "AI生产/H3生产包/assets/characters.json",
+    "scenes": "AI生产/H3生产包/assets/scenes.json"
+  },
+  "execution_policy": {
+    "compile_is_free": true,
+    "default_mode": "dry-run",
+    "paid_scope": "一次只能明确选择一个章节，并指定一个或多个格，或显式 --all-grids。",
+    "automatic_retry": false,
+    "skip_existing_output": true,
+    "credentials": "H3只接受已保存在本机MMX配置中的Pay-as-you-go/Credit API key；仓库不保存、回显或拼接密钥。"
+  },
+  "chapters": [
+    {
+      "chapter": 1,
+      "title": "输掉决赛后，我成了大清女队首发",
+      "storyboard": "分镜/第01章_十格分镜.md",
+      "status": "revised_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 9
+    },
+    {
+      "chapter": 2,
+      "title": "五席与五种责任",
+      "storyboard": "分镜/第02章_十格分镜.md",
+      "status": "revised_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 3,
+      "title": "默认不是发呆",
+      "storyboard": "分镜/第03章_十格分镜.md",
+      "status": "revised_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 4,
+      "title": "谁能拍板",
+      "storyboard": "分镜/第04章_十格分镜.md",
+      "status": "revised_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 5,
+      "title": "箱姐的长线",
+      "storyboard": "分镜/第05章_十格分镜.md",
+      "status": "revised_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 6,
+      "title": "雨姐不先进",
+      "storyboard": "分镜/第06章_十格分镜.md",
+      "status": "revised_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 7,
+      "title": "老六姐留在后面",
+      "storyboard": "分镜/第07章_十格分镜.md",
+      "status": "revised_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 8,
+      "title": "旧债入场",
+      "storyboard": "分镜/第08章_十格分镜.md",
+      "status": "revised_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 9,
+      "title": "复盘处不审判",
+      "storyboard": "分镜/第09章_十格分镜.md",
+      "status": "revised_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 10,
+      "title": "暂停要过三道门",
+      "storyboard": "分镜/第10章_十格分镜.md",
+      "status": "revised_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 11,
+      "title": "五席责任栏",
+      "storyboard": "分镜/第11章_十格分镜.md",
+      "status": "revised_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 12,
+      "title": "图池不是命令",
+      "storyboard": "分镜/第12章_十格分镜.md",
+      "status": "revised_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 13,
+      "title": "经济表上的五个名字",
+      "storyboard": "分镜/第13章_十格分镜.md",
+      "status": "revised_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 14,
+      "title": "复盘不是审判",
+      "storyboard": "分镜/第14章_十格分镜.md",
+      "status": "revised_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 15,
+      "title": "第二次交火",
+      "storyboard": "分镜/第15章_十格分镜.md",
+      "status": "revised_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 16,
+      "title": "观众剪成总监",
+      "storyboard": "分镜/第16章_十格分镜.md",
+      "status": "revised_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 17,
+      "title": "外队接待处",
+      "storyboard": "分镜/第17章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 18,
+      "title": "主狙与暂停权",
+      "storyboard": "分镜/第18章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 19,
+      "title": "一次保枪",
+      "storyboard": "分镜/第19章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 20,
+      "title": "老六姐的晚到信息",
+      "storyboard": "分镜/第20章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 21,
+      "title": "训练场换人",
+      "storyboard": "分镜/第21章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 22,
+      "title": "小组赛晋级",
+      "storyboard": "分镜/第22章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 23,
+      "title": "舆论要一个叛徒",
+      "storyboard": "分镜/第23章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 24,
+      "title": "合同页边",
+      "storyboard": "分镜/第24章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 25,
+      "title": "离队不是黑屏",
+      "storyboard": "分镜/第25章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 26,
+      "title": "空出来的第五席",
+      "storyboard": "分镜/第26章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 27,
+      "title": "霜旌队的主将",
+      "storyboard": "分镜/第27章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 28,
+      "title": "霍昭宁申请试位",
+      "storyboard": "分镜/第28章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 29,
+      "title": "五人之外的声音",
+      "storyboard": "分镜/第29章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 30,
+      "title": "旧队新口令",
+      "storyboard": "分镜/第30章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 31,
+      "title": "第一次重逢赛",
+      "storyboard": "分镜/第31章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 32,
+      "title": "回放证据",
+      "storyboard": "分镜/第32章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 33,
+      "title": "临时席不是永久席",
+      "storyboard": "分镜/第33章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 34,
+      "title": "五席制度修订",
+      "storyboard": "分镜/第34章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 35,
+      "title": "BO5禁图",
+      "storyboard": "分镜/第35章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 36,
+      "title": "第一图长线",
+      "storyboard": "分镜/第36章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 37,
+      "title": "第二图入口",
+      "storyboard": "分镜/第37章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 38,
+      "title": "第三图晚段",
+      "storyboard": "分镜/第38章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 39,
+      "title": "暂停中的两种指挥",
+      "storyboard": "分镜/第39章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 40,
+      "title": "霜旌队换边",
+      "storyboard": "分镜/第40章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 41,
+      "title": "赛点不替人选择",
+      "storyboard": "分镜/第41章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 42,
+      "title": "公开责任栏",
+      "storyboard": "分镜/第42章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 43,
+      "title": "复盘后的签字",
+      "storyboard": "分镜/第43章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    },
+    {
+      "chapter": 44,
+      "title": "打完比赛再谈权力",
+      "storyboard": "分镜/第44章_十格分镜.md",
+      "status": "draft_pending_independent_review",
+      "protagonist_id": "CHAR_ZEIZEI",
+      "protagonist_ref_from_grid": 1
+    }
+  ],
+  "future_chapters": [
+    {
+      "chapter": 45,
+      "status": "outline_only_not_executable",
+      "source": "05_第二篇章Ch45—56总纲.md"
+    },
+    {
+      "chapter": 46,
+      "status": "outline_only_not_executable",
+      "source": "05_第二篇章Ch45—56总纲.md"
+    },
+    {
+      "chapter": 47,
+      "status": "outline_only_not_executable",
+      "source": "05_第二篇章Ch45—56总纲.md"
+    },
+    {
+      "chapter": 48,
+      "status": "outline_only_not_executable",
+      "source": "05_第二篇章Ch45—56总纲.md"
+    },
+    {
+      "chapter": 49,
+      "status": "outline_only_not_executable",
+      "source": "05_第二篇章Ch45—56总纲.md"
+    },
+    {
+      "chapter": 50,
+      "status": "outline_only_not_executable",
+      "source": "05_第二篇章Ch45—56总纲.md"
+    },
+    {
+      "chapter": 51,
+      "status": "outline_only_not_executable",
+      "source": "05_第二篇章Ch45—56总纲.md"
+    },
+    {
+      "chapter": 52,
+      "status": "outline_only_not_executable",
+      "source": "05_第二篇章Ch45—56总纲.md"
+    },
+    {
+      "chapter": 53,
+      "status": "outline_only_not_executable",
+      "source": "05_第二篇章Ch45—56总纲.md"
+    },
+    {
+      "chapter": 54,
+      "status": "outline_only_not_executable",
+      "source": "05_第二篇章Ch45—56总纲.md"
+    },
+    {
+      "chapter": 55,
+      "status": "outline_only_not_executable",
+      "source": "05_第二篇章Ch45—56总纲.md"
+    },
+    {
+      "chapter": 56,
+      "status": "outline_only_not_executable",
+      "source": "05_第二篇章Ch45—56总纲.md"
+    }
+  ]
+}

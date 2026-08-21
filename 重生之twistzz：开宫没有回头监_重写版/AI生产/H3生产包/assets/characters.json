@@ -1,0 +1,259 @@
+{
+  "schema_version": "1.0",
+  "source_of_truth": [
+    "人物档案/00_人物档案总表.md",
+    "人物档案/23_全员外貌性格与古风发式深化.md",
+    "人物档案/23A_发型参考源与无武器定妆规范.md"
+  ],
+  "reference_policy": "仅有已验收三视图的角色填写 reference_image；白底三视图只锁身份、脸型、发式和服装层级，不复制排版、文字或空手站姿。",
+  "characters": [
+    {
+      "id": "CHAR_ZEIZEI",
+      "name": "贼贼姐",
+      "aliases": [
+        "贼贼姐",
+        "小贼贼",
+        "狗贼",
+        "贼姐姐"
+      ],
+      "role": "大清战队首发二号位步枪手；第一人称主角制作标签",
+      "appearance_lock": "成年女性，中等身高，窄椭圆脸，平肩，重心略前；偏分贴鬓，小型偏心低髻，歪银簪，右鬓一缕耳机压乱的碎发；墨黑、旧银、暗红；卷起右袖。",
+      "performance_lock": "先报位置、人数和时间，再给意见；慌张被压缩成检查动作；不能拍成天生领袖、嘴炮打脸王或无代价救世主。",
+      "reference_image": "角色三视图/大清五席/01_贼贼姐_三视图.png"
+    },
+    {
+      "id": "CHAR_QIZHAOSHUANG",
+      "name": "戚照霜",
+      "aliases": [
+        "戚照霜"
+      ],
+      "role": "执行教练、继任制度负责人",
+      "appearance_lock": "成年女性，中高个，长方脸，平直眉尾，薄唇；中分贴鬓、低位绾髻、乌木窄扁方；霜灰、乌木、纸白。",
+      "performance_lock": "动作像收进鞘里的尺，说话带时间点与执行动作；不占五席，不替IGL拍板。",
+      "reference_image": "角色三视图/大清五席/06_戚照霜_三视图.png"
+    },
+    {
+      "id": "CHAR_XIXUEHUANG",
+      "name": "郗雪篁",
+      "aliases": [
+        "郗雪篁"
+      ],
+      "role": "设备与数据队务",
+      "appearance_lock": "成年女性，高瘦，冷肤色，窄脸长手指；细辫盘入低髻、灰铁短簪、耳下碎发；冰灰、靛蓝、金属黑。",
+      "performance_lock": "先核编号与磨损，再给结论；不上场，不替箱姐拿主狙席。",
+      "reference_image": null
+    },
+    {
+      "id": "CHAR_TAOLINGYI",
+      "name": "陶令仪",
+      "aliases": [
+        "陶令仪"
+      ],
+      "role": "道具与训练分析师",
+      "appearance_lock": "成年女性，个子不高，圆眼尖下颌；两股细辫收成低双环盘髻、短铜簪；铜棕、米白、烟青。",
+      "performance_lock": "把争论换算成烟闪、经济和代价，嘴快但不刻薄；提供证据，不替五席决定。",
+      "reference_image": null
+    },
+    {
+      "id": "CHAR_HUOZHAONING",
+      "name": "霍昭宁",
+      "aliases": [
+        "霍昭宁"
+      ],
+      "role": "注册替补突破手；后期临时第五席候选",
+      "appearance_lock": "成年女性，年轻结实，额头开阔、下颌倔，腿部力量明显；高束长辫，窄红绳，训练时辫子收进后领；赤褐、黑、少量亮红。",
+      "performance_lock": "回答快、承诺快、脚尖点地；想证明自己但不能写成无脑莽夫；席位必须逐项人工确认。",
+      "reference_image": "角色三视图/大清五席/07_霍昭宁_三视图.png"
+    },
+    {
+      "id": "CHAR_YANGUICHI",
+      "name": "燕归迟",
+      "aliases": [
+        "燕归迟"
+      ],
+      "role": "非报名训练候选",
+      "appearance_lock": "成年女性，小幅圆脸、眼尾微垂、窄肩；偏低圆髻、浅灰布带、薄碎发；浅灰、茶白、雾蓝。",
+      "performance_lock": "先照顾别人、紧张时捏袖口；成长是明确说出需求，不能永远拍成被保护的妹妹。",
+      "reference_image": null
+    },
+    {
+      "id": "CHAR_YANTINGLAN",
+      "name": "晏听澜",
+      "aliases": [
+        "晏听澜"
+      ],
+      "role": "回录司证据与时间轴负责人",
+      "appearance_lock": "成年女性，修长窄脸、薄眼皮、直鼻梁；窄横髻、哑黑扁方；黑、冷白、回放绿。",
+      "performance_lock": "一句纠正一个事实，拖时间轴时手腕快；提供证据但不是侦探神谕。",
+      "reference_image": null
+    },
+    {
+      "id": "CHAR_GUZHEZHI",
+      "name": "顾折枝",
+      "aliases": [
+        "顾折枝"
+      ],
+      "role": "司竞监赛籍、队籍与申诉流程负责人",
+      "appearance_lock": "成年女性，高颧骨、直眉、修长；工作时收窄旗髻、深玉扁方或方形铜压发片；黛青、深玉、朱印红。",
+      "performance_lock": "客气而精确，让异议落到条款；不是宫斗反派，也不是万能法务。",
+      "reference_image": null
+    },
+    {
+      "id": "CHAR_LUOYAOYIN",
+      "name": "洛遥音",
+      "aliases": [
+        "洛遥音"
+      ],
+      "role": "观议司直播、解说与公共版本负责人",
+      "appearance_lock": "成年女性，杏眼、唇形清楚，身形轻盈，镜头前后气场不同；工作发式克制、能戴监听耳机；玉白屏与朱红字幕卡为道具锚。",
+      "performance_lock": "懂镜头和传播，但不能让公共标签替代名册、合同和赛务事实；“总监”只属于舆论层。",
+      "reference_image": null
+    },
+    {
+      "id": "CHAR_HUYANJI",
+      "name": "呼延霁",
+      "aliases": [
+        "呼延霁"
+      ],
+      "role": "北凛联邦霜旌队IGL、对手队长",
+      "appearance_lock": "成年女性，对手队长层级，冷硬轮廓、实用束发、北凛队服材质与大清明确区分；不使用现实战队标识。",
+      "performance_lock": "报点与转点清楚、承担公开决策，不拍成单纯反派。",
+      "reference_image": null
+    },
+    {
+      "id": "CHAR_DABIAOJIE",
+      "name": "大表姐",
+      "aliases": [
+        "大表姐"
+      ],
+      "role": "开局大清战队资深IGL；第25章后离队",
+      "appearance_lock": "成年女性，方下颌，短发直肩，稳重肩线；黑红耳机、红签册、可翻队长牌；服装沉稳，不做华丽宫装。",
+      "performance_lock": "先检查工作事实，再吐槽或担心；拍板但不替队员操作；离队后队籍与旧关系必须分开。",
+      "reference_image": "角色三视图/大清五席/02_大表姐_三视图.png"
+    },
+    {
+      "id": "CHAR_XIANGJIE",
+      "name": "箱姐",
+      "aliases": [
+        "箱姐",
+        "箱子"
+      ],
+      "role": "大清战队首发主狙",
+      "appearance_lock": "成年女性，高瘦窄脸，耳下碎发，灰蓝护臂；主狙匣、遮光扇为动作资产，不进入空手定妆；冷灰蓝色阶。",
+      "performance_lock": "对长线与设备资源敏感，先确认可见事实；不是高冷花瓶，也不被队务替代。",
+      "reference_image": "角色三视图/大清五席/03_箱姐_三视图.png"
+    },
+    {
+      "id": "CHAR_YUJIE",
+      "name": "雨姐",
+      "aliases": [
+        "雨姐"
+      ],
+      "role": "大清战队首发首接触／锚点",
+      "appearance_lock": "成年女性，宽肩方脸，贴颈短发，红黑护腕；朱漆枪匣仅在动作资产；体态有老将力量感。",
+      "performance_lock": "第一反应直接、敢进也敢保枪；不能只拍成莽撞入口工具人。",
+      "reference_image": "角色三视图/大清五席/04_雨姐_三视图.png"
+    },
+    {
+      "id": "CHAR_LAOLIUJIE",
+      "name": "老六姐",
+      "aliases": [
+        "老六姐"
+      ],
+      "role": "大清战队首发游走／晚段信息",
+      "appearance_lock": "成年女性，高瘦长脸，高束深发，墨青袖扣，青色回放签；动作低可见但轮廓清楚。",
+      "performance_lock": "先拆分信息再下结论，晚到但不神隐；不能用“老六”标签替代空间逻辑。",
+      "reference_image": "角色三视图/大清五席/05_老六姐_三视图.png"
+    },
+    {
+      "id": "CHAR_WENJIE",
+      "name": "稳姐",
+      "aliases": [
+        "稳姐"
+      ],
+      "role": "海西自治领金火队支援、补枪与锚点",
+      "appearance_lock": "成年女性，外邦支援位，沉稳低重心、耐用队服和固定支援道具；色彩与大清暗红、北凛冷灰均区分。",
+      "performance_lock": "争取固定支援席，不做随叫随到的临时补丁。",
+      "reference_image": null
+    },
+    {
+      "id": "CHAR_ZHUIWENJIE",
+      "name": "追问姐",
+      "aliases": [
+        "追问姐"
+      ],
+      "role": "西澜商盟白弦队战术主位／AWP信息追问",
+      "appearance_lock": "成年女性，线条利落、商盟制服裁剪精确，随身带战术问询卡和长线观察装置；无现实战队标识。",
+      "performance_lock": "追问发令条件与证据，不拍成纯嘴炮角色。",
+      "reference_image": null
+    },
+    {
+      "id": "CHAR_CHONGMEI",
+      "name": "冲妹",
+      "aliases": [
+        "冲妹"
+      ],
+      "role": "东陆诸邦赤鸢队快攻／首接触",
+      "appearance_lock": "成年女性，紧凑运动体态，高速束发，赤鸢队实用护具；快而不飘，不使用动漫夸张速度线。",
+      "performance_lock": "把五秒合法决定变成压力；不是无脑冲锋。",
+      "reference_image": null
+    },
+    {
+      "id": "CHAR_LENGMEI",
+      "name": "冷妹",
+      "aliases": [
+        "冷妹"
+      ],
+      "role": "北凛联邦霜旌队灵活步枪／二次补枪",
+      "appearance_lock": "成年女性，年轻、冷静、灵活步枪位；北凛冷灰制服、简洁束发、轻型护臂。",
+      "performance_lock": "根据场景可称主角“贼姐姐”，但必须有跨队或后辈关系依据。",
+      "reference_image": null
+    },
+    {
+      "id": "CHAR_MIJIAOJIE",
+      "name": "米教姐",
+      "aliases": [
+        "米教姐"
+      ],
+      "role": "大清战队登记“一教”、核心教练",
+      "appearance_lock": "成年女性，后排支持者体态，训练尺、计时器、可拆训练表；发式便于长时间监听与伏案。",
+      "performance_lock": "给训练目标与暂停建议，不抢IGL镜头、不替五席按键或签席位。",
+      "reference_image": null
+    },
+    {
+      "id": "CHAR_WENHUOJIE",
+      "name": "稳火姐",
+      "aliases": [
+        "稳火姐"
+      ],
+      "role": "大清战队前史的前任外聘教练",
+      "appearance_lock": "成年女性，资深外聘教练气质，朴素工作服、旧训练册与后排耳机；不做神秘导师造型。",
+      "performance_lock": "凭授权调用旧册和复盘，不改首发、资格或合同。",
+      "reference_image": null
+    },
+    {
+      "id": "CHAR_MUHOUJIE",
+      "name": "幕后姐",
+      "aliases": [
+        "幕后姐"
+      ],
+      "role": "北凛联邦霜旌队总教练兼队务领队",
+      "appearance_lock": "成年女性，后台连续性与队务领队气质，冷灰层叠工作服、资料夹、设备标签；与呼延霁队长位区分。",
+      "performance_lock": "协调资源、提出方案和维持团队，不替队长、IGL或赛务最终决定。",
+      "reference_image": null
+    },
+    {
+      "id": "CHAR_SHENHENG",
+      "name": "沈衡",
+      "aliases": [
+        "沈衡",
+        "皇帝",
+        "陛下"
+      ],
+      "role": "大清皇帝；国策、预算总盘、任免与公开责任",
+      "appearance_lock": "原创成年女性，约38岁；克制的帝王工作服制与正式发式，御前听报室中以预算案、回放墙、会签页和责任令建立权力，不以奢华珠翠建立身份。",
+      "performance_lock": "可定国策和公开责任，但不亲自报点、调枪、改比分、授予外挂或单签具体席位；不恋爱、不做终极反派。",
+      "reference_image": null
+    }
+  ]
+}
