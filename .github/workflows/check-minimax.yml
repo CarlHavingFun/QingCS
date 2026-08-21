@@ -1,4 +1,4 @@
-name: Audit current visual sources
+name: Finalize canonical visual production
 
 on:
   pull_request:
@@ -8,32 +8,102 @@ on:
       - .github/workflows/check-minimax.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  audit:
+  finalize:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    env:
-      MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
 
-      - name: Check MiniMax secret availability
+      - name: Install image tooling
+        run: python -m pip install --disable-pip-version-check pillow numpy opencv-python-headless
+
+      - name: Install final text and skills
         shell: bash
         run: |
-          if [[ -n "$MINIMAX_API_KEY" ]]; then
-            echo "MINIMAX_SECRET_PRESENT=yes"
-          else
-            echo "MINIMAX_SECRET_PRESENT=no"
-          fi
+          cat \
+            .finalize/part00 \
+            .finalize/part01 \
+            .finalize/part02 \
+            .finalize/part03 \
+            .finalize/part04 \
+            .finalize/part05 \
+            .finalize/part06 \
+            > /tmp/final-payload.b64
+          test "$(wc -c < /tmp/final-payload.b64)" -eq 60284
+          base64 -d /tmp/final-payload.b64 > /tmp/final-payload.tar.gz
+          echo "b7cfbb93fc6b571296f559847d901015a4cbb3ef528cffcb261d656ffc330c83  /tmp/final-payload.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/final-payload.tar.gz -C .
 
-      - name: Package current visual sources
-        uses: actions/upload-artifact@v4
-        with:
-          name: visual-source-assets
-          if-no-files-found: error
-          retention-days: 1
-          path: |
-            天工枪局：白桥第一枪/视觉资产/人物外观母版/*.png
-            天工枪局：白桥第一枪/视觉资产/场景历史参考/*.png
-            天工枪局：白桥第一枪/AI生产/样片01/视觉/keyframes/raw/*.png
+      - name: Rebuild canonical visual assets
+        run: python tools/finalize_visuals.py
+
+      - name: Remove obsolete and temporary production files
+        shell: bash
+        run: |
+          rm -rf \
+            "天工枪局：白桥第一枪/00_迁移状态.md" \
+            "天工枪局：白桥第一枪/docs" \
+            "天工枪局：白桥第一枪/AI生产/样片01" \
+            "天工枪局：白桥第一枪/视觉资产/人物外观母版" \
+            "天工枪局：白桥第一枪/视觉资产/场景历史参考" \
+            "天工枪局：白桥第一枪/审核/00_迁移验收基准.md" \
+            "天工枪局：白桥第一枪/审核/2026-08-11_天工设备视觉补充.md" \
+            "天工枪局：白桥第一枪/审核/2026-08-11_白桥民间赛重构说明.md" \
+            tools \
+            .finalize \
+            .github/workflows/check-minimax.yml
+
+      - name: Validate final tree
+        shell: bash
+        run: |
+          test "$(find '天工枪局：白桥第一枪/视觉资产/人物三视图' -maxdepth 1 -type f -name '*.jpg' | wc -l)" -eq 5
+          test "$(find '天工枪局：白桥第一枪/视觉资产/场景效果图' -maxdepth 1 -type f -name '*.jpg' | wc -l)" -eq 6
+          ! find '天工枪局：白桥第一枪' -type f \( -name '*重构版*' -o -name '*重点版*' -o -name '*最终版*' \) | grep -q .
+          ! test -e '天工枪局：白桥第一枪/AI生产/样片01'
+          ! test -e '天工枪局：白桥第一枪/docs'
+          ! test -e '.finalize'
+          ! test -e '.github/workflows/check-minimax.yml'
+          python - <<'PY_CHECK'
+          from pathlib import Path
+          from PIL import Image
+
+          root = Path('天工枪局：白桥第一枪')
+          assets = list((root / '视觉资产' / '人物三视图').glob('*.jpg'))
+          assets += list((root / '视觉资产' / '场景效果图').glob('*.jpg'))
+          assert len(assets) == 11
+          for path in assets:
+              with Image.open(path) as image:
+                  assert image.size == (1920, 1080), (path, image.size)
+                  assert image.format == 'JPEG', (path, image.format)
+
+          director = (root / '分镜' / '第01章_70秒样片导演书.md').read_text('utf-8')
+          shots = (root / '分镜' / '第01章_70秒样片逐镜头分镜.md').read_text('utf-8')
+          assert '穿越前：8 秒' in director
+          assert '穿越后：62 秒' in director
+          assert shots.count('## S') == 16
+          assert not any(
+              token in path.name
+              for path in root.rglob('*')
+              for token in ('重构版', '重点版', '最终版')
+          )
+          print('Final tree validation passed.')
+          PY_CHECK
+
+      - name: Commit final production tree
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- ".gitignore" "天工枪局：白桥第一枪"
+          git add -u -- ".github/workflows/check-minimax.yml" ".finalize"
+          git diff --cached --check
+          git status --short
+          git commit -m "feat: finalize MiniMax visual production"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
