@@ -1,4 +1,4 @@
-name: Check MiniMax readiness
+name: Audit current visual sources
 
 on:
   pull_request:
@@ -11,12 +11,14 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  audit:
     runs-on: ubuntu-latest
     env:
       MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
     steps:
-      - name: Check secret availability
+      - uses: actions/checkout@v4
+
+      - name: Check MiniMax secret availability
         shell: bash
         run: |
           if [[ -n "$MINIMAX_API_KEY" ]]; then
@@ -24,3 +26,14 @@ jobs:
           else
             echo "MINIMAX_SECRET_PRESENT=no"
           fi
+
+      - name: Package current visual sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-source-assets
+          if-no-files-found: error
+          retention-days: 1
+          path: |
+            天工枪局：白桥第一枪/视觉资产/人物外观母版/*.png
+            天工枪局：白桥第一枪/视觉资产/场景历史参考/*.png
+            天工枪局：白桥第一枪/AI生产/样片01/视觉/keyframes/raw/*.png
