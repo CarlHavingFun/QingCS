@@ -1,0 +1,86 @@
+name: Build QingCS ComfyUI MiniMax-H3 Pack
+
+on:
+  push:
+    branches:
+      - codex/qingcs-minimax-h3-production-pack
+    paths:
+      - "重生之twistzz：开宫没有回头监_重写版/AI生产/ComfyUI一键包/**"
+      - ".github/workflows/build-qingcs-comfyui-pack.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Extract build source
+        run: |
+          mkdir -p "$RUNNER_TEMP/qingcs_pack_source"
+          unzip -q "重生之twistzz：开宫没有回头监_重写版/AI生产/ComfyUI一键包/qingcs_comfyui_pack_source.zip" -d "$RUNNER_TEMP/qingcs_pack_source"
+
+      - name: Run tests
+        run: |
+          cd "$RUNNER_TEMP/qingcs_pack_source"
+          python -m unittest discover -s tests -v
+          python -Wall -m compileall -q .
+
+      - name: Build one-click ZIP
+        run: |
+          cd "$RUNNER_TEMP/qingcs_pack_source"
+          python build_release.py \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --dist-dir "$GITHUB_WORKSPACE/dist"
+
+      - name: Verify archive
+        run: |
+          python - <<'PY'
+          import json
+          import zipfile
+          from pathlib import Path
+
+          archive = Path("dist/QingCS_ComfyUI_MinimaxH3_OneClick.zip")
+          if not archive.is_file():
+              raise SystemExit("missing release zip")
+          with zipfile.ZipFile(archive) as handle:
+              names = handle.namelist()
+              required = {
+                  "README_先看.txt",
+                  "generated/index.json",
+                  "generated/h3_jobs/ch01.h3.json",
+                  "generated/h3_jobs/ch44.h3.json",
+                  "generated/frame_tasks/ch01.frames.json",
+                  "generated/frame_tasks/ch44.frames.json",
+                  "generated/h3_ui_workflows/ch01/QINGCS_CH01_G01.comfyui.json",
+                  "generated/h3_ui_workflows/ch44/QINGCS_CH44_G10.comfyui.json",
+                  "tools/qingcs_runtime.py",
+              }
+              missing = sorted(required - set(names))
+              if missing:
+                  raise SystemExit(f"archive missing: {missing}")
+              index = json.loads(handle.read("generated/index.json"))
+              assert index["chapter_count"] == 44, index
+              assert index["job_count"] == 440, index
+              assert index["frame_task_count"] == 880, index
+          print(f"ZIP_OK files={len(names)} size={archive.stat().st_size}")
+          PY
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: QingCS-ComfyUI-MiniMaxH3-OneClick
+          path: dist/QingCS_ComfyUI_MinimaxH3_OneClick.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
