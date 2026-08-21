@@ -1,9 +1,9 @@
 name: Check MiniMax readiness
 
 on:
-  push:
+  pull_request:
     branches:
-      - feat/final-visual-production
+      - main
     paths:
       - .github/workflows/check-minimax.yml
 
