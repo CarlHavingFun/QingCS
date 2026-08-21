@@ -1,9 +1,9 @@
 name: Fetch official ComfyUI MiniMax H3 template
 
 on:
-  push:
+  pull_request:
     branches:
-      - feat/final-visual-production
+      - main
     paths:
       - .github/workflows/fetch-h3-template.yml
 
