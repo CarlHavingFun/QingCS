@@ -1,6 +1,6 @@
 # ComfyUI public bridge probe
 
-- UTC: 2026-08-23T09:26:00Z
+- UTC: 2026-08-23T09:27:29Z
 - Base: `https://my-agent.com.cn/comfy`
 
 ## DNS
@@ -19,7 +19,15 @@
 - Final URL: `https://my-agent.com.cn/auth/`
 - Content-Type: `text/html; charset=utf-8`
 - Bytes: `1137`
-- HTML title: `none`
+
+## Authentication page structure (values redacted)
+```text
+forms= []
+inputs= []
+buttons= []
+visible_text= You need to enable JavaScript to run this app.
+script_hints= ['src=./static/js/index.CXslS62G.js']
+```
 
 ### `/queue`
 - Initial HTTP: `302`
@@ -28,7 +36,6 @@
 - Final URL: `https://my-agent.com.cn/auth/`
 - Content-Type: `text/html; charset=utf-8`
 - Bytes: `1137`
-- HTML title: `none`
 
 ### `/history`
 - Initial HTTP: `302`
@@ -37,7 +44,6 @@
 - Final URL: `https://my-agent.com.cn/auth/`
 - Content-Type: `text/html; charset=utf-8`
 - Bytes: `1137`
-- HTML title: `none`
 
 ### `/object_info`
 - Initial HTTP: `302`
@@ -46,4 +52,3 @@
 - Final URL: `https://my-agent.com.cn/auth/`
 - Content-Type: `text/html; charset=utf-8`
 - Bytes: `1137`
-- HTML title: `none`
