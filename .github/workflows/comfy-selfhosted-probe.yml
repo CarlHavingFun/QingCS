@@ -1,0 +1,142 @@
+name: comfy-selfhosted-probe
+
+on:
+  push:
+    branches:
+      - codex/ch01-motion-comic-h3-pack
+    paths:
+      - .github/workflows/comfy-selfhosted-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: self-hosted
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/ch01-motion-comic-h3-pack
+
+      - name: Probe local ComfyUI without modifying it
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          New-Item -ItemType Directory -Force -Path '.github/probe' | Out-Null
+          $report = '.github/probe/comfy-selfhosted-probe.md'
+          $lines = [System.Collections.Generic.List[string]]::new()
+          $lines.Add('# Local self-hosted ComfyUI probe')
+          $lines.Add('')
+          $lines.Add("- UTC: ``$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))``")
+          $lines.Add("- Runner OS: ``$env:RUNNER_OS``")
+          $lines.Add("- Runner architecture: ``$env:RUNNER_ARCH``")
+          $lines.Add('')
+
+          $candidates = @(
+            'http://127.0.0.1:8188',
+            'http://localhost:8188',
+            'http://127.0.0.1:8189',
+            'http://localhost:8189',
+            'http://127.0.0.1:8000',
+            'http://localhost:8000'
+          )
+          $connected = $null
+          foreach ($base in $candidates) {
+            try {
+              $r = Invoke-WebRequest -UseBasicParsing -TimeoutSec 8 -Uri "$base/system_stats"
+              $lines.Add("- Probe ``$base``: HTTP ``$($r.StatusCode)``")
+              if ($r.StatusCode -eq 200 -and $r.Content.TrimStart().StartsWith('{')) {
+                $connected = $base
+                break
+              }
+            } catch {
+              $kind = $_.Exception.GetType().Name
+              $lines.Add("- Probe ``$base``: ``$kind``")
+            }
+          }
+
+          $lines.Add('')
+          if ($connected) {
+            $lines.Add("- Status: ``LOCAL_COMFY_CONNECTED``")
+            $lines.Add("- Base URL: ``$connected``")
+            try {
+              $stats = Invoke-RestMethod -TimeoutSec 20 -Uri "$connected/system_stats"
+              $safe = [ordered]@{
+                system = [ordered]@{
+                  os = $stats.system.os
+                  comfyui_version = $stats.system.comfyui_version
+                  python_version = $stats.system.python_version
+                  pytorch_version = $stats.system.pytorch_version
+                }
+                devices = @($stats.devices | ForEach-Object {
+                  [ordered]@{
+                    name = $_.name
+                    type = $_.type
+                    vram_total = $_.vram_total
+                    vram_free = $_.vram_free
+                    torch_vram_total = $_.torch_vram_total
+                    torch_vram_free = $_.torch_vram_free
+                  }
+                })
+              }
+              $lines.Add('')
+              $lines.Add('## Sanitized system stats')
+              $lines.Add('```json')
+              $lines.Add(($safe | ConvertTo-Json -Depth 8))
+              $lines.Add('```')
+            } catch {
+              $lines.Add("- system_stats parse error: ``$($_.Exception.GetType().Name)``")
+            }
+
+            try {
+              $nodes = Invoke-RestMethod -TimeoutSec 120 -Uri "$connected/object_info"
+              $names = @($nodes.PSObject.Properties.Name | Where-Object {
+                $_ -match 'MiniMaxH3|LoadImage|SaveVideo|CreateVideo|VAEDecodeAudio|KSampler|UNETLoader|CLIPLoader|VAELoader'
+              } | Sort-Object -Unique)
+              $lines.Add('')
+              $lines.Add('## Relevant nodes')
+              $lines.Add('```text')
+              foreach ($n in $names) { $lines.Add($n) }
+              $lines.Add('```')
+            } catch {
+              $lines.Add("- object_info error: ``$($_.Exception.GetType().Name)``")
+            }
+
+            try {
+              $q = Invoke-RestMethod -TimeoutSec 20 -Uri "$connected/queue"
+              $pending = @($q.queue_pending).Count
+              $running = @($q.queue_running).Count
+              $lines.Add('')
+              $lines.Add("- Queue pending: ``$pending``")
+              $lines.Add("- Queue running: ``$running``")
+            } catch {
+              $lines.Add("- queue error: ``$($_.Exception.GetType().Name)``")
+            }
+          } else {
+            $lines.Add('- Status: `NO_LOCAL_COMFY_API_FOUND`')
+            $lines.Add('')
+            $lines.Add('## Process hints')
+            $lines.Add('```text')
+            try {
+              Get-Process | Where-Object { $_.ProcessName -match 'python|comfy|pinokio' } |
+                Select-Object -First 20 -ExpandProperty ProcessName -Unique |
+                ForEach-Object { $lines.Add($_) }
+            } catch {}
+            $lines.Add('```')
+          }
+
+          Set-Content -LiteralPath $report -Value $lines -Encoding utf8
+
+      - name: Commit sanitized probe result
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config user.name 'QingCS Local Runner'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -- '.github/probe/comfy-selfhosted-probe.md'
+          git commit -m 'ci: record local ComfyUI probe'
+          if ($LASTEXITCODE -eq 0) {
+            git push origin HEAD:codex/ch01-motion-comic-h3-pack
+          }
