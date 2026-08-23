@@ -1,0 +1,91 @@
+name: comfy-public-probe
+
+on:
+  push:
+    branches:
+      - codex/ch01-motion-comic-h3-pack
+    paths:
+      - .github/workflows/comfy-public-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/ch01-motion-comic-h3-pack
+
+      - name: Probe ComfyUI public bridge
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p .github/probe
+          base='https://my-agent.com.cn/comfy'
+          report='.github/probe/comfy-public-probe.md'
+          tmpdir="$(mktemp -d)"
+          {
+            echo '# ComfyUI public bridge probe'
+            echo
+            echo "- UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "- Base: \`$base\`"
+            echo
+            echo '## DNS'
+            echo '```text'
+            getent ahosts my-agent.com.cn 2>&1 || true
+            echo '```'
+            echo
+            echo '## Endpoints'
+          } > "$report"
+
+          for endpoint in system_stats queue history object_info; do
+            body="$tmpdir/${endpoint}.body"
+            headers="$tmpdir/${endpoint}.headers"
+            code="$(curl -k -sS --connect-timeout 12 --max-time 40 \
+              -D "$headers" -o "$body" -w '%{http_code}' \
+              "$base/$endpoint" 2>"$tmpdir/${endpoint}.err" || true)"
+            ctype="$(awk 'BEGIN{IGNORECASE=1} /^content-type:/{gsub(/\r/,""); print $2; exit}' "$headers" 2>/dev/null || true)"
+            bytes="$(wc -c < "$body" 2>/dev/null || echo 0)"
+            {
+              echo
+              echo "### \`/$endpoint\`"
+              echo "- HTTP: \`${code:-curl_failed}\`"
+              echo "- Content-Type: \`${ctype:-unknown}\`"
+              echo "- Bytes: \`$bytes\`"
+              if [[ -s "$tmpdir/${endpoint}.err" ]]; then
+                echo '- Curl error:'
+                echo '```text'
+                sed -n '1,8p' "$tmpdir/${endpoint}.err"
+                echo '```'
+              fi
+            } >> "$report"
+
+            if [[ "$code" == '200' && "$endpoint" == 'system_stats' ]]; then
+              echo '- Sanitized response:' >> "$report"
+              echo '```json' >> "$report"
+              jq '{system: {os: .system.os, comfyui_version: .system.comfyui_version, python_version: .system.python_version, pytorch_version: .system.pytorch_version}, devices: [.devices[]? | {name, type, vram_total, vram_free, torch_vram_total, torch_vram_free}]}' "$body" 2>/dev/null >> "$report" || head -c 1200 "$body" >> "$report"
+              echo >> "$report"
+              echo '```' >> "$report"
+            fi
+
+            if [[ "$code" == '200' && "$endpoint" == 'object_info' ]]; then
+              echo '- Relevant node types:' >> "$report"
+              echo '```json' >> "$report"
+              jq 'keys | map(select(test("MiniMaxH3|LoadImage|SaveVideo|CreateVideo|VAEDecodeAudio")))' "$body" 2>/dev/null >> "$report" || true
+              echo '```' >> "$report"
+            fi
+          done
+
+      - name: Commit sanitized probe result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'QingCS Comfy Probe'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/probe/comfy-public-probe.md
+          git commit -m 'ci: record ComfyUI bridge probe' || exit 0
+          git push origin HEAD:codex/ch01-motion-comic-h3-pack
