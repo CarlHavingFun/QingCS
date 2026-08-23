@@ -91,9 +91,75 @@ jobs:
               echo '```' >> "$report"
             fi
 
-            if [[ "$final_code" == '200' && "$ctype" == *html* ]]; then
-              title="$(tr '\n' ' ' < "$body" | sed -n 's/.*<title[^>]*>\([^<]*\)<\/title>.*/\1/p' | head -c 200)"
-              echo "- HTML title: \`${title:-none}\`" >> "$report"
+            if [[ "$endpoint" == 'system_stats' && "$final_code" == '200' && "$ctype" == *html* && "$effective" == *'/auth/'* ]]; then
+              echo >> "$report"
+              echo '## Authentication page structure (values redacted)' >> "$report"
+              echo '```text' >> "$report"
+              python - "$body" <<'PY' >> "$report"
+          import re
+          import sys
+          from html.parser import HTMLParser
+
+          class AuthParser(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.forms = []
+                  self.inputs = []
+                  self.buttons = []
+                  self.scripts = []
+                  self.text = []
+                  self._button = False
+                  self._button_text = []
+                  self._script = False
+                  self._script_text = []
+
+              def handle_starttag(self, tag, attrs):
+                  data = dict(attrs)
+                  if tag == 'form':
+                      self.forms.append({k: data.get(k) for k in ('method', 'action')})
+                  elif tag == 'input':
+                      self.inputs.append({k: data.get(k) for k in ('type', 'name', 'id', 'placeholder', 'autocomplete')})
+                  elif tag == 'button':
+                      self._button = True
+                      self._button_text = []
+                  elif tag == 'script':
+                      self._script = True
+                      self._script_text = []
+                      if data.get('src'):
+                          self.scripts.append('src=' + data['src'])
+
+              def handle_endtag(self, tag):
+                  if tag == 'button' and self._button:
+                      self.buttons.append(' '.join(''.join(self._button_text).split()))
+                      self._button = False
+                  elif tag == 'script' and self._script:
+                      code = ''.join(self._script_text)
+                      for pat in (r"fetch\(([^\n;]{1,240})", r"axios\.([a-z]+)\(([^\n;]{1,240})", r"location\.[a-z]+\s*=\s*([^\n;]{1,240})"):
+                          for m in re.finditer(pat, code):
+                              item = m.group(0)
+                              item = re.sub(r"(['\"])([^'\"]{20,})\1", r"\1<redacted-or-path>\1", item)
+                              self.scripts.append(item)
+                      self._script = False
+
+              def handle_data(self, data):
+                  if self._button:
+                      self._button_text.append(data)
+                  if self._script:
+                      self._script_text.append(data)
+                  else:
+                      stripped = ' '.join(data.split())
+                      if stripped:
+                          self.text.append(stripped)
+
+          p = AuthParser()
+          p.feed(open(sys.argv[1], encoding='utf-8', errors='replace').read())
+          print('forms=', p.forms)
+          print('inputs=', p.inputs)
+          print('buttons=', p.buttons)
+          print('visible_text=', ' | '.join(p.text)[:1200])
+          print('script_hints=', p.scripts[:20])
+          PY
+              echo '```' >> "$report"
             fi
           done
 
