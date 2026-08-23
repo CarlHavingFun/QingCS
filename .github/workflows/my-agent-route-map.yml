@@ -1,0 +1,92 @@
+name: my-agent-route-map
+
+on:
+  push:
+    branches:
+      - codex/ch01-motion-comic-h3-pack
+    paths:
+      - .github/workflows/my-agent-route-map.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/ch01-motion-comic-h3-pack
+
+      - name: Map non-destructive public routes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .github/probe
+          base='https://my-agent.com.cn'
+          report='.github/probe/my-agent-route-map.md'
+          tmpdir="$(mktemp -d)"
+          paths=(
+            '/'
+            '/robots.txt'
+            '/.well-known/openid-configuration'
+            '/healthz'
+            '/api/health'
+            '/openapi.json'
+            '/comfy'
+            '/comfy/'
+            '/comfy/api'
+            '/comfy/api/system_stats'
+            '/comfy/system_stats'
+            '/comfy/object_info'
+            '/comfy/queue'
+            '/comfy/history'
+            '/comfy/prompt'
+            '/comfy/ws'
+            '/api/comfy/system_stats'
+            '/mcp'
+            '/mcp/'
+            '/devspace'
+            '/devspace/'
+            '/godot'
+            '/godot/'
+            '/iterm2'
+            '/iterm2/'
+            '/ssh'
+            '/ssh/'
+            '/auth/api/state'
+          )
+
+          {
+            echo '# my-agent.com.cn route map'
+            echo
+            echo "- UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo '- Method: GET without credentials, no mutation, redirects not followed.'
+            echo
+            echo '| Path | HTTP | Location | Content-Type | Bytes |'
+            echo '|---|---:|---|---|---:|'
+          } > "$report"
+
+          i=0
+          for path in "${paths[@]}"; do
+            i=$((i+1))
+            headers="$tmpdir/$i.headers"
+            body="$tmpdir/$i.body"
+            code="$(curl -k -sS --connect-timeout 10 --max-time 25 -D "$headers" -o "$body" -w '%{http_code}' "$base$path" || true)"
+            location="$(awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/^[^:]*:[[:space:]]*/,""); gsub(/\r/,""); print; exit}' "$headers" | sed 's/[?].*$//' | sed 's/|/%7C/g')"
+            ctype="$(awk 'BEGIN{IGNORECASE=1} /^content-type:/{sub(/^[^:]*:[[:space:]]*/,""); gsub(/\r/,""); print; exit}' "$headers" | sed 's/|/%7C/g')"
+            bytes="$(wc -c < "$body" | tr -d ' ')"
+            printf '| `%s` | `%s` | `%s` | `%s` | `%s` |\n' "$path" "${code:-curl_failed}" "${location:-none}" "${ctype:-unknown}" "$bytes" >> "$report"
+          done
+
+      - name: Commit route map
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'QingCS Bridge Probe'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/probe/my-agent-route-map.md
+          git commit -m 'ci: record local agent route map' || exit 0
+          git push origin HEAD:codex/ch01-motion-comic-h3-pack
