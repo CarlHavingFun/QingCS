@@ -1,0 +1,98 @@
+name: comfy-auth-api-probe
+
+on:
+  push:
+    branches:
+      - codex/ch01-motion-comic-h3-pack
+    paths:
+      - .github/workflows/comfy-auth-api-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/ch01-motion-comic-h3-pack
+
+      - name: Probe public Authelia API
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .github/probe
+          report='.github/probe/comfy-auth-api-probe.md'
+          tmpdir="$(mktemp -d)"
+          {
+            echo '# Authelia public API probe'
+            echo
+            echo "- UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          } > "$report"
+
+          endpoints=(
+            '/auth/api/configuration'
+            '/auth/api/state'
+            '/auth/api/firstfactor'
+            '/auth/api/secondfactor'
+            '/auth/api/oidc/device-authorization'
+          )
+
+          for endpoint in "${endpoints[@]}"; do
+            safe="$(echo "$endpoint" | tr '/:' '__')"
+            body="$tmpdir/$safe.body"
+            meta="$(curl -k -sS --connect-timeout 12 --max-time 40 \
+              -o "$body" -w '%{http_code}|%{content_type}|%{url_effective}' \
+              "https://my-agent.com.cn$endpoint" 2>"$tmpdir/$safe.err" || true)"
+            IFS='|' read -r code ctype effective <<< "$meta"
+            effective="${effective%%\?*}"
+            bytes="$(wc -c < "$body" 2>/dev/null || echo 0)"
+            {
+              echo
+              echo "## \`$endpoint\`"
+              echo "- HTTP: \`${code:-curl_failed}\`"
+              echo "- Content-Type: \`${ctype:-unknown}\`"
+              echo "- Bytes: \`$bytes\`"
+              echo "- Effective URL: \`${effective:-unknown}\`"
+            } >> "$report"
+
+            if [[ "$ctype" == *json* && -s "$body" ]]; then
+              echo '```json' >> "$report"
+              python - "$body" <<'PY' >> "$report"
+          import json, re, sys
+          from pathlib import Path
+          data = json.loads(Path(sys.argv[1]).read_text('utf-8', errors='replace'))
+          sensitive = re.compile(r'(token|secret|password|cookie|session|credential)', re.I)
+          def clean(v, key=''):
+              if sensitive.search(str(key)):
+                  return '<redacted>'
+              if isinstance(v, dict):
+                  return {k: clean(x, k) for k, x in v.items()}
+              if isinstance(v, list):
+                  return [clean(x, key) for x in v]
+              if isinstance(v, str) and len(v) > 180:
+                  return v[:180] + '…'
+              return v
+          print(json.dumps(clean(data), ensure_ascii=False, indent=2)[:8000])
+          PY
+              echo '```' >> "$report"
+            elif [[ -s "$body" ]]; then
+              echo '```text' >> "$report"
+              head -c 1200 "$body" | sed -E 's/[A-Za-z0-9_-]{28,}/<redacted>/g' >> "$report"
+              echo >> "$report"
+              echo '```' >> "$report"
+            fi
+          done
+
+      - name: Commit sanitized result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'QingCS Comfy Probe'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/probe/comfy-auth-api-probe.md
+          git commit -m 'ci: record Authelia public API probe' || exit 0
+          git push origin HEAD:codex/ch01-motion-comic-h3-pack
