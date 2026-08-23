@@ -43,17 +43,29 @@ jobs:
           } > "$report"
 
           for endpoint in system_stats queue history object_info; do
+            url="$base/$endpoint"
             body="$tmpdir/${endpoint}.body"
-            headers="$tmpdir/${endpoint}.headers"
-            code="$(curl -k -sS --connect-timeout 12 --max-time 40 \
-              -D "$headers" -o "$body" -w '%{http_code}' \
-              "$base/$endpoint" 2>"$tmpdir/${endpoint}.err" || true)"
-            ctype="$(awk 'BEGIN{IGNORECASE=1} /^content-type:/{gsub(/\r/,""); print $2; exit}' "$headers" 2>/dev/null || true)"
+            initial_headers="$tmpdir/${endpoint}.initial.headers"
+            final_headers="$tmpdir/${endpoint}.final.headers"
+            initial_code="$(curl -k -sS --connect-timeout 12 --max-time 40 \
+              -D "$initial_headers" -o /dev/null -w '%{http_code}' \
+              "$url" 2>"$tmpdir/${endpoint}.initial.err" || true)"
+            location="$(awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/^[^:]*:[[:space:]]*/,""); gsub(/\r/,""); print; exit}' "$initial_headers" 2>/dev/null || true)"
+            meta="$(curl -k -L -sS --connect-timeout 12 --max-time 50 \
+              -D "$final_headers" -o "$body" \
+              -w '%{http_code}|%{url_effective}|%{content_type}' \
+              "$url" 2>"$tmpdir/${endpoint}.err" || true)"
+            IFS='|' read -r final_code effective ctype <<< "$meta"
+            effective="${effective%%\?*}"
+            location="${location%%\?*}"
             bytes="$(wc -c < "$body" 2>/dev/null || echo 0)"
             {
               echo
               echo "### \`/$endpoint\`"
-              echo "- HTTP: \`${code:-curl_failed}\`"
+              echo "- Initial HTTP: \`${initial_code:-curl_failed}\`"
+              echo "- Redirect: \`${location:-none}\`"
+              echo "- Final HTTP: \`${final_code:-curl_failed}\`"
+              echo "- Final URL: \`${effective:-unknown}\`"
               echo "- Content-Type: \`${ctype:-unknown}\`"
               echo "- Bytes: \`$bytes\`"
               if [[ -s "$tmpdir/${endpoint}.err" ]]; then
@@ -64,7 +76,7 @@ jobs:
               fi
             } >> "$report"
 
-            if [[ "$code" == '200' && "$endpoint" == 'system_stats' ]]; then
+            if [[ "$final_code" == '200' && "$ctype" == *json* && "$endpoint" == 'system_stats' ]]; then
               echo '- Sanitized response:' >> "$report"
               echo '```json' >> "$report"
               jq '{system: {os: .system.os, comfyui_version: .system.comfyui_version, python_version: .system.python_version, pytorch_version: .system.pytorch_version}, devices: [.devices[]? | {name, type, vram_total, vram_free, torch_vram_total, torch_vram_free}]}' "$body" 2>/dev/null >> "$report" || head -c 1200 "$body" >> "$report"
@@ -72,11 +84,16 @@ jobs:
               echo '```' >> "$report"
             fi
 
-            if [[ "$code" == '200' && "$endpoint" == 'object_info' ]]; then
+            if [[ "$final_code" == '200' && "$ctype" == *json* && "$endpoint" == 'object_info' ]]; then
               echo '- Relevant node types:' >> "$report"
               echo '```json' >> "$report"
               jq 'keys | map(select(test("MiniMaxH3|LoadImage|SaveVideo|CreateVideo|VAEDecodeAudio")))' "$body" 2>/dev/null >> "$report" || true
               echo '```' >> "$report"
+            fi
+
+            if [[ "$final_code" == '200' && "$ctype" == *html* ]]; then
+              title="$(tr '\n' ' ' < "$body" | sed -n 's/.*<title[^>]*>\([^<]*\)<\/title>.*/\1/p' | head -c 200)"
+              echo "- HTML title: \`${title:-none}\`" >> "$report"
             fi
           done
 
