@@ -1,0 +1,80 @@
+name: comfy-auth-contract
+
+on:
+  push:
+    branches:
+      - codex/ch01-motion-comic-h3-pack
+    paths:
+      - .github/workflows/comfy-auth-contract.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/ch01-motion-comic-h3-pack
+
+      - name: Inspect first-factor client module
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .github/probe
+          base='https://my-agent.com.cn/auth/static/js/'
+          files=(
+            'services.Password.CtBaoSU7.js'
+            'portal.FirstFactorForm.5Gd6DmSP.js'
+            'layouts.Login.DIbxNq8s.js'
+          )
+          tmpdir="$(mktemp -d)"
+          for file in "${files[@]}"; do
+            curl -k -L -fsS --connect-timeout 12 --max-time 50 "$base$file" -o "$tmpdir/$file"
+          done
+          python - "$tmpdir" > .github/probe/comfy-auth-contract.md <<'PY'
+          import re, sys
+          from pathlib import Path
+          root = Path(sys.argv[1])
+          print('# Authelia first-factor client contract')
+          print()
+          needles = ('firstfactor', 'username', 'password', 'rememberme', 'targeturl', 'requestmethod', 'axios', 'post(')
+          for path in sorted(root.iterdir()):
+              raw = path.read_text('utf-8', errors='replace')
+              print(f'## `{path.name}`')
+              print(f'- Bytes: `{len(raw.encode("utf-8"))}`')
+              print('```text')
+              low = raw.lower()
+              out = []
+              for needle in needles:
+                  start = 0
+                  n = 0
+                  while n < 15:
+                      idx = low.find(needle, start)
+                      if idx < 0:
+                          break
+                      a, b = max(0, idx - 240), min(len(raw), idx + 500)
+                      s = re.sub(r'\s+', ' ', raw[a:b])
+                      s = re.sub(r'([A-Za-z0-9_-]{32,})', '<redacted>', s)
+                      if s not in out:
+                          out.append(s)
+                      start = idx + len(needle)
+                      n += 1
+              for s in out[:60]:
+                  print(s[:760])
+              print('```')
+              print()
+          PY
+
+      - name: Commit result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'QingCS Comfy Probe'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/probe/comfy-auth-contract.md
+          git commit -m 'ci: record Authelia first-factor contract' || exit 0
+          git push origin HEAD:codex/ch01-motion-comic-h3-pack
