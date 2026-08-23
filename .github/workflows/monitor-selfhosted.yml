@@ -1,0 +1,77 @@
+name: monitor-selfhosted
+
+on:
+  push:
+    branches:
+      - codex/ch01-motion-comic-h3-pack
+    paths:
+      - .github/workflows/monitor-selfhosted.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/ch01-motion-comic-h3-pack
+
+      - name: Inspect self-hosted workflow and registered runners
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p .github/probe
+          report='.github/probe/selfhosted-monitor.md'
+          api='https://api.github.com'
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28')
+
+          runs_json="$(mktemp)"
+          runners_json="$(mktemp)"
+          runs_code="$(curl -sS "${auth[@]}" -o "$runs_json" -w '%{http_code}' \
+            "$api/repos/$GH_REPO/actions/workflows/comfy-selfhosted-probe.yml/runs?branch=codex%2Fch01-motion-comic-h3-pack&per_page=20")"
+          runners_code="$(curl -sS "${auth[@]}" -o "$runners_json" -w '%{http_code}' \
+            "$api/repos/$GH_REPO/actions/runners?per_page=100")"
+
+          {
+            echo '# Self-hosted runner monitor'
+            echo
+            echo "- UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "- Workflow runs HTTP: \`$runs_code\`"
+            echo "- Runners HTTP: \`$runners_code\`"
+            echo
+            echo '## Recent self-hosted workflow runs'
+            echo '```json'
+            if [[ "$runs_code" == '200' ]]; then
+              jq '[.workflow_runs[] | {id,status,conclusion,event,head_branch,head_sha,run_attempt,created_at,updated_at,jobs_url}]' "$runs_json"
+            else
+              jq '{message,status}' "$runs_json" 2>/dev/null || cat "$runs_json"
+            fi
+            echo '```'
+            echo
+            echo '## Registered self-hosted runners (sanitized)'
+            echo '```json'
+            if [[ "$runners_code" == '200' ]]; then
+              jq '{total_count, runners:[.runners[] | {id,name,status,busy,labels:[.labels[].name]}]}' "$runners_json"
+            else
+              jq '{message,status}' "$runners_json" 2>/dev/null || cat "$runners_json"
+            fi
+            echo '```'
+          } > "$report"
+
+      - name: Commit monitor result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'QingCS Actions Monitor'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/probe/selfhosted-monitor.md
+          git commit -m 'ci: record self-hosted runner status' || exit 0
+          git push origin HEAD:codex/ch01-motion-comic-h3-pack
