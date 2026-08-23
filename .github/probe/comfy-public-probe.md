@@ -1,6 +1,6 @@
 # ComfyUI public bridge probe
 
-- UTC: 2026-08-23T09:25:15Z
+- UTC: 2026-08-23T09:26:00Z
 - Base: `https://my-agent.com.cn/comfy`
 
 ## DNS
@@ -13,21 +13,37 @@
 ## Endpoints
 
 ### `/system_stats`
-- HTTP: `302`
-- Content-Type: `text/html`
-- Bytes: `145`
+- Initial HTTP: `302`
+- Redirect: `https://my-agent.com.cn/auth/`
+- Final HTTP: `200`
+- Final URL: `https://my-agent.com.cn/auth/`
+- Content-Type: `text/html; charset=utf-8`
+- Bytes: `1137`
+- HTML title: `none`
 
 ### `/queue`
-- HTTP: `302`
-- Content-Type: `text/html`
-- Bytes: `145`
+- Initial HTTP: `302`
+- Redirect: `https://my-agent.com.cn/auth/`
+- Final HTTP: `200`
+- Final URL: `https://my-agent.com.cn/auth/`
+- Content-Type: `text/html; charset=utf-8`
+- Bytes: `1137`
+- HTML title: `none`
 
 ### `/history`
-- HTTP: `302`
-- Content-Type: `text/html`
-- Bytes: `145`
+- Initial HTTP: `302`
+- Redirect: `https://my-agent.com.cn/auth/`
+- Final HTTP: `200`
+- Final URL: `https://my-agent.com.cn/auth/`
+- Content-Type: `text/html; charset=utf-8`
+- Bytes: `1137`
+- HTML title: `none`
 
 ### `/object_info`
-- HTTP: `302`
-- Content-Type: `text/html`
-- Bytes: `145`
+- Initial HTTP: `302`
+- Redirect: `https://my-agent.com.cn/auth/`
+- Final HTTP: `200`
+- Final URL: `https://my-agent.com.cn/auth/`
+- Content-Type: `text/html; charset=utf-8`
+- Bytes: `1137`
+- HTML title: `none`
