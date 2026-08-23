@@ -1,0 +1,118 @@
+name: comfy-authenticated-probe
+
+on:
+  push:
+    branches:
+      - codex/ch01-motion-comic-h3-pack
+    paths:
+      - .github/workflows/comfy-authenticated-probe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      MY_AGENT_USERNAME: ${{ secrets.MY_AGENT_USERNAME }}
+      MY_AGENT_PASSWORD: ${{ secrets.MY_AGENT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/ch01-motion-comic-h3-pack
+
+      - name: Authenticate and probe ComfyUI
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .github/probe
+          report='.github/probe/comfy-authenticated-probe.md'
+          cookie="$(mktemp)"
+          login_body="$(mktemp)"
+          stats="$(mktemp)"
+          nodes="$(mktemp)"
+
+          {
+            echo '# Authenticated ComfyUI probe'
+            echo
+            echo "- UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          } > "$report"
+
+          if [[ -z "${MY_AGENT_USERNAME:-}" || -z "${MY_AGENT_PASSWORD:-}" ]]; then
+            {
+              echo '- Status: `BLOCKED_MISSING_SECRETS`'
+              echo '- Required repository secrets: `MY_AGENT_USERNAME`, `MY_AGENT_PASSWORD`'
+            } >> "$report"
+          else
+            curl -k -sS -c "$cookie" -b "$cookie" \
+              'https://my-agent.com.cn/auth/api/state' -o /dev/null
+
+            payload="$(jq -n \
+              --arg username "$MY_AGENT_USERNAME" \
+              --arg password "$MY_AGENT_PASSWORD" \
+              --arg targetURL 'https://my-agent.com.cn/comfy/' \
+              '{username:$username,password:$password,keepMeLoggedIn:false,targetURL:$targetURL,requestMethod:"GET"}')"
+
+            login_code="$(curl -k -sS -c "$cookie" -b "$cookie" \
+              -H 'Content-Type: application/json' \
+              -o "$login_body" -w '%{http_code}' \
+              -X POST 'https://my-agent.com.cn/auth/api/firstfactor' \
+              --data-binary "$payload" || true)"
+
+            state="$(curl -k -sS -c "$cookie" -b "$cookie" \
+              'https://my-agent.com.cn/auth/api/state' || true)"
+            level="$(jq -r '.data.authentication_level // -1' <<< "$state" 2>/dev/null || echo -1)"
+
+            stats_meta="$(curl -k -sS -L -c "$cookie" -b "$cookie" \
+              -o "$stats" -w '%{http_code}|%{content_type}|%{url_effective}' \
+              'https://my-agent.com.cn/comfy/system_stats' || true)"
+            IFS='|' read -r stats_code stats_type stats_url <<< "$stats_meta"
+            stats_url="${stats_url%%\?*}"
+
+            nodes_meta="$(curl -k -sS -L -c "$cookie" -b "$cookie" \
+              -o "$nodes" -w '%{http_code}|%{content_type}|%{url_effective}' \
+              'https://my-agent.com.cn/comfy/object_info' || true)"
+            IFS='|' read -r nodes_code nodes_type nodes_url <<< "$nodes_meta"
+            nodes_url="${nodes_url%%\?*}"
+
+            {
+              echo "- Login HTTP: \`${login_code:-curl_failed}\`"
+              echo "- Authentication level: \`$level\`"
+              echo "- Comfy system_stats: \`${stats_code:-curl_failed}\` \`${stats_type:-unknown}\` \`${stats_url:-unknown}\`"
+              echo "- Comfy object_info: \`${nodes_code:-curl_failed}\` \`${nodes_type:-unknown}\` \`${nodes_url:-unknown}\`"
+            } >> "$report"
+
+            if [[ "$stats_code" == '200' && "$stats_type" == *json* ]]; then
+              echo '- Status: `COMFY_API_AUTHENTICATED`' >> "$report"
+              echo '## Sanitized system stats' >> "$report"
+              echo '```json' >> "$report"
+              jq '{system:{os:.system.os,comfyui_version:.system.comfyui_version,python_version:.system.python_version,pytorch_version:.system.pytorch_version},devices:[.devices[]?|{name,type,vram_total,vram_free,torch_vram_total,torch_vram_free}]}' "$stats" >> "$report" 2>/dev/null || true
+              echo '```' >> "$report"
+            else
+              echo '- Status: `AUTH_OR_POLICY_NOT_SATISFIED`' >> "$report"
+              echo '## Sanitized login response' >> "$report"
+              echo '```json' >> "$report"
+              jq 'del(.data.username,.data.email,.data.display_name,.data.groups)' "$login_body" >> "$report" 2>/dev/null || head -c 1000 "$login_body" | sed -E 's/[A-Za-z0-9_-]{28,}/<redacted>/g' >> "$report"
+              echo >> "$report"
+              echo '```' >> "$report"
+            fi
+
+            if [[ "$nodes_code" == '200' && "$nodes_type" == *json* ]]; then
+              echo '## Relevant ComfyUI nodes' >> "$report"
+              echo '```json' >> "$report"
+              jq 'keys | map(select(test("MiniMaxH3|LoadImage|SaveVideo|CreateVideo|VAEDecodeAudio")))' "$nodes" >> "$report" 2>/dev/null || true
+              echo '```' >> "$report"
+            fi
+          fi
+
+      - name: Commit sanitized result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'QingCS Comfy Probe'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/probe/comfy-authenticated-probe.md
+          git commit -m 'ci: record authenticated ComfyUI probe' || exit 0
+          git push origin HEAD:codex/ch01-motion-comic-h3-pack
