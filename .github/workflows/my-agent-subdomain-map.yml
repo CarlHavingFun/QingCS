@@ -1,0 +1,66 @@
+name: my-agent-subdomain-map
+
+on:
+  push:
+    branches:
+      - codex/ch01-motion-comic-h3-pack
+    paths:
+      - .github/workflows/my-agent-subdomain-map.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/ch01-motion-comic-h3-pack
+
+      - name: Query public certificate transparency and DNS
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .github/probe
+          report='.github/probe/my-agent-subdomain-map.md'
+          tmp="$(mktemp)"
+          curl -fsS --connect-timeout 12 --max-time 45 \
+            'https://crt.sh/?q=%25.my-agent.com.cn&output=json' -o "$tmp" || echo '[]' > "$tmp"
+
+          names="$(jq -r '.[].name_value // empty' "$tmp" 2>/dev/null | tr '\r' '\n' | tr '\\n' '\n' | sed 's/^\*\.//' | grep -E '(^|\.)my-agent\.com\.cn$' | sort -u || true)"
+          common=(comfy devspace mcp api ssh iterm2 godot agent canengine terminal shell ws websocket)
+          {
+            echo '# my-agent.com.cn public service-name map'
+            echo
+            echo "- UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo
+            echo '## Certificate Transparency names'
+            echo '```text'
+            printf '%s\n' "$names"
+            echo '```'
+            echo
+            echo '## DNS resolution for CT and common service names'
+            echo '| Host | IPv4 | IPv6 |'
+            echo '|---|---|---|'
+          } > "$report"
+
+          all_names="$(printf '%s\n' "$names"; for n in "${common[@]}"; do echo "$n.my-agent.com.cn"; done | sort -u)"
+          while IFS= read -r host; do
+            [[ -n "$host" ]] || continue
+            ipv4="$(getent ahostsv4 "$host" 2>/dev/null | awk '{print $1}' | sort -u | paste -sd, - || true)"
+            ipv6="$(getent ahostsv6 "$host" 2>/dev/null | awk '{print $1}' | sort -u | paste -sd, - || true)"
+            printf '| `%s` | `%s` | `%s` |\n' "$host" "${ipv4:-none}" "${ipv6:-none}" >> "$report"
+          done <<< "$all_names"
+
+      - name: Commit public map
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'QingCS Bridge Probe'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/probe/my-agent-subdomain-map.md
+          git commit -m 'ci: record my-agent public service names' || exit 0
+          git push origin HEAD:codex/ch01-motion-comic-h3-pack
