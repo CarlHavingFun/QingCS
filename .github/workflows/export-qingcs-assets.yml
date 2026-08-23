@@ -1,0 +1,71 @@
+name: export-qingcs-assets
+
+on:
+  push:
+    branches:
+      - codex/ch01-motion-comic-h3-pack
+    paths:
+      - .github/workflows/export-qingcs-assets.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/ch01-motion-comic-h3-pack
+          lfs: true
+
+      - name: Collect approved project references
+        shell: bash
+        run: |
+          set -euo pipefail
+          root='重生之twistzz：开宫没有回头监_重写版'
+          out='export/qingcs-ch01-reference-assets'
+          mkdir -p "$out/characters" "$out/scenes" "$out/docs"
+          cp -- "$root/角色三视图/大清五席/01_贼贼姐_三视图.png" "$out/characters/"
+          cp -- "$root/角色三视图/大清五席/02_大表姐_三视图.png" "$out/characters/"
+          cp -- "$root/角色三视图/大清五席/03_箱姐_三视图.png" "$out/characters/"
+          cp -- "$root/角色三视图/大清五席/04_雨姐_三视图.png" "$out/characters/"
+          cp -- "$root/角色三视图/大清五席/05_老六姐_三视图.png" "$out/characters/"
+          cp -- "$root/角色三视图/场景设定图/ESP-00_大清与多国宫廷电竞设定六宫格.png" "$out/scenes/"
+          cp -- "$root/角色三视图/场景设定图/PALACE-OVERVIEW-01_大清战队宫廷电竞基地一览图.png" "$out/scenes/"
+          cp -- "$root/角色三视图/场景设定图/SCN-00_宫廷电竞世界场景九宫格概念板.png" "$out/scenes/"
+          cp -- "$root/角色三视图/场景设定图/SCN-05_夜间训练通道.png" "$out/scenes/"
+          cp -- "$root/正文/第01章_输掉决赛后，我成了大清女队首发.md" "$out/docs/"
+          cp -- "$root/分镜/第01章_十格分镜.md" "$out/docs/"
+          cp -- "$root/分镜/第01章_导演书与镜头表.md" "$out/docs/"
+          find "$out" -type f -print0 | sort -z | xargs -0 sha256sum > "$out/SHA256SUMS.txt"
+
+      - name: Upload reference artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qingcs-ch01-reference-assets
+          path: export/qingcs-ch01-reference-assets
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+      - name: Record run ID for retrieval
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .github/probe
+          {
+            echo '# QingCS chapter 1 asset export'
+            echo
+            echo "- UTC: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "- Run ID: \`${{ github.run_id }}\`"
+            echo '- Artifact: `qingcs-ch01-reference-assets`'
+          } > .github/probe/export-assets-run.md
+          git config user.name 'QingCS Asset Export'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/probe/export-assets-run.md
+          git commit -m 'ci: record QingCS asset export run' || exit 0
+          git push origin HEAD:codex/ch01-motion-comic-h3-pack
