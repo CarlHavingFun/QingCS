@@ -1,0 +1,121 @@
+name: comfy-auth-inspect
+
+on:
+  push:
+    branches:
+      - codex/ch01-motion-comic-h3-pack
+    paths:
+      - .github/workflows/comfy-auth-inspect.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/ch01-motion-comic-h3-pack
+
+      - name: Inspect public auth JavaScript contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .github/probe
+          html="$(mktemp)"
+          js="$(mktemp)"
+          curl -k -L -fsS --connect-timeout 12 --max-time 50 \
+            'https://my-agent.com.cn/auth/' -o "$html"
+          script_path="$(grep -oE 'src="[^"]+\.js"' "$html" | head -1 | sed -E 's/^src="|"$//g')"
+          case "$script_path" in
+            http*) js_url="$script_path" ;;
+            /*) js_url="https://my-agent.com.cn${script_path}" ;;
+            ./*) js_url="https://my-agent.com.cn/auth/${script_path#./}" ;;
+            *) js_url="https://my-agent.com.cn/auth/$script_path" ;;
+          esac
+          curl -k -L -fsS --connect-timeout 12 --max-time 50 "$js_url" -o "$js"
+          python - "$js" "$js_url" > .github/probe/comfy-auth-inspect.md <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+
+          raw = Path(sys.argv[1]).read_text('utf-8', errors='replace')
+          url = sys.argv[2].split('?', 1)[0]
+          words = ('auth', 'login', 'password', 'token', 'cookie', 'bearer', 'authorization',
+                   'localstorage', 'sessionstorage', 'username', 'access', 'verify', 'logout')
+
+          strings = []
+          for quote, body in re.findall(r"(['\"])((?:\\.|(?!\1).){1,240})\1", raw):
+              low = body.lower()
+              if any(w in low for w in words):
+                  if re.fullmatch(r'[A-Za-z0-9._~-]{24,}', body):
+                      body = '<redacted-long-token-like-string>'
+                  strings.append(body)
+
+          paths = set(re.findall(r"/(?:[A-Za-z0-9._~!$&'()*+,;=:@%-]+/?){1,8}", raw))
+          paths = sorted(p for p in paths if any(w in p.lower() for w in words) and len(p) <= 180)
+
+          snippets = []
+          lower = raw.lower()
+          for needle in words:
+              start = 0
+              count = 0
+              while count < 8:
+                  idx = lower.find(needle, start)
+                  if idx < 0:
+                      break
+                  a, b = max(0, idx - 100), min(len(raw), idx + 180)
+                  s = re.sub(r'\s+', ' ', raw[a:b])
+                  s = re.sub(r'([A-Za-z0-9_-]{28,})', '<redacted>', s)
+                  snippets.append(s)
+                  start = idx + len(needle)
+                  count += 1
+
+          def unique(seq):
+              seen = set()
+              out = []
+              for x in seq:
+                  if x not in seen:
+                      seen.add(x)
+                      out.append(x)
+              return out
+
+          strings = unique(strings)[:120]
+          snippets = unique(snippets)[:80]
+
+          print('# ComfyUI auth client inspection')
+          print()
+          print(f'- JavaScript URL: `{url}`')
+          print(f'- JavaScript bytes: `{len(raw.encode("utf-8"))}`')
+          print()
+          print('## Auth-related string literals')
+          print('```text')
+          for s in strings:
+              print(s[:240])
+          print('```')
+          print()
+          print('## Auth-related path candidates')
+          print('```text')
+          for p in paths[:120]:
+              print(p)
+          print('```')
+          print()
+          print('## Sanitized code snippets')
+          print('```text')
+          for s in snippets:
+              print(s[:320])
+          print('```')
+          PY
+
+      - name: Commit sanitized inspection result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'QingCS Comfy Probe'
+          git config user.email 'actions@users.noreply.github.com'
+          git add .github/probe/comfy-auth-inspect.md
+          git commit -m 'ci: record ComfyUI auth contract' || exit 0
+          git push origin HEAD:codex/ch01-motion-comic-h3-pack
