@@ -1,0 +1,59 @@
+{
+  "schema_version": 2,
+  "book_name": "天工枪局：白桥第一枪",
+  "analysis_type": "long_import_partial_single_chapter",
+  "pipeline_status": "pending_more_source",
+  "source_root": "E:\\03_QingCS\\QingCS\\天工枪局：白桥第一枪",
+  "canonical_text_root": "正文",
+  "canonical_revision": {
+    "sha256": "A61E4FCA24206B5E22AE0CC35A71B64BA30FDEF1A249327C8B8C816928341080",
+    "measured_at": "2026-08-25",
+    "chapter_count": 1,
+    "line_count": 348,
+    "character_count_excluding_line_endings": 8474,
+    "non_whitespace_character_count": 8416,
+    "byte_count": 26395
+  },
+  "source_files": [
+    {
+      "chapter": 1,
+      "title": "输掉 Major 后，我从民间赛重新开始",
+      "path": "正文/第01章_输掉Major后，我从民间赛重新开始.md",
+      "backup_path": "原文/第001章_输掉Major后，我从民间赛重新开始.md",
+      "sha256": "A61E4FCA24206B5E22AE0CC35A71B64BA30FDEF1A249327C8B8C816928341080",
+      "line_count": 348,
+      "character_count_excluding_line_endings": 8474,
+      "non_whitespace_character_count": 8416,
+      "byte_count": 26395,
+      "start_line": 1
+    }
+  ],
+  "chapter_count": 1,
+  "total_characters_excluding_line_endings": 8474,
+  "total_non_whitespace_characters": 8416,
+  "genre_detected": "架空清制现代社会·职业枪战竞技·穿越成长群像",
+  "target_platform": "",
+  "target_platform_status": "unspecified",
+  "stages_completed": [0],
+  "stage_status": {
+    "0": "completed_for_current_source",
+    "1": "partial_1_of_3",
+    "2": "completed_for_available_chapters_1_of_1",
+    "3": "partial_projection_single_chapter",
+    "4": "partial_projection_plus_authority_index",
+    "5": "partial_report_low_confidence",
+    "6": "partial_style_profile_single_chapter"
+  },
+  "golden_three_available": 1,
+  "golden_three_required": 3,
+  "confidence": "low",
+  "confidence_reason": "连载当前只有第一章；黄金三章样本仅 1/3。正文事实可高置信回查，但跨章节奏、角色弧与全书结构均不得视为完整结论。",
+  "authority_note": "拆文库为自分析与兼容投影；人物权威仍在项目根人物档案，专名与原创边界以设定/IP圣经/00_专名词典与原创边界.md 为准。",
+  "is_self_analysis": true,
+  "eligible_as_benchmark": false,
+  "benchmark_note": "本书自分析不得注册或复制为本书外部对标；当前未选择任何外部对标。",
+  "tracking_initialized": true,
+  "created_at": "2026-08-25",
+  "updated_at": "2026-08-25",
+  "pipeline_fallback": "单章材料由当前 Codex 子代理按 story-long-analyze 模板直接处理；未调用项目 custom chapter-extractor。"
+}
