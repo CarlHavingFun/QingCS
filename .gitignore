@@ -4,3 +4,10 @@ Thumbs.db
 **/Thumbs.db
 .superpowers/
 .worktrees/
+.env
+.env.*
+!.env.example
+.mmx/
+**/.mmx/
+**/credentials.json
+**/*.local.*
